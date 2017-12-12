@@ -1,0 +1,7 @@
+data/bin
+data/*.png
+*/__pycache__/
+*.pyc
+*.zip
+results/
+weights/

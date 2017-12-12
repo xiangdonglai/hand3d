@@ -31,7 +31,7 @@ import scipy.misc
 import struct
 
 # SET THIS to where RHD is located on your machine
-path_to_db = './RHD_published_v2/'
+path_to_db = '/data1/donglaix/data/RHD_published_v2/'
 
 # chose if you want to create a binary for training or evaluation set
 # set = 'training'
