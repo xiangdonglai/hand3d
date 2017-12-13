@@ -34,8 +34,8 @@ import struct
 path_to_db = '/data1/donglaix/data/RHD_published_v2/'
 
 # chose if you want to create a binary for training or evaluation set
-# set = 'training'
-set = 'evaluation'
+set = 'training'
+# set = 'evaluation'
 
 ### No more changes below this line ###
 
