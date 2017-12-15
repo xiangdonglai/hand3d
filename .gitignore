@@ -6,3 +6,4 @@ data/*.png
 results/
 weights/
 *.pkl
+*.bin

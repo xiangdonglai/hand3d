@@ -1,7 +1,7 @@
 %% SCRIPT TO PROCESS the STB dataset by Zhang et al., ‘3d Hand Pose Tracking and Estimation Using Stereo Matching’, 2016 into binary format
 
 % SET THIS to where you have the dataset
-PATH_TO_DATASET = '/misc/lmbraid19/zimmermc/datasets/StereoHandTracking/';
+PATH_TO_DATASET = '/home/donglaix/donglaix/Experiments/StereoHandTracking/';
 
 %% no more changes below %%
 
