@@ -410,10 +410,12 @@ def plot_hand(coords_hw, axis, color_fixed=None, linewidth='1'):
         coord1 = coords_hw[connection[0], :]
         coord2 = coords_hw[connection[1], :]
         coords = np.stack([coord1, coord2])
+        if coord1[0] == 0 and coord1[1] == 0 or coord2[0] == 0 and coord2[1] == 0:
+            continue
         if color_fixed is None:
             axis.plot(coords[:, 1], coords[:, 0], color=color, linewidth=linewidth)
         else:
-            axis.plot(coords[:, 1], coords[:, 0], color_fixed, linewidth=linewidth)
+            axis.plot(coords[:, 1], coords[:, 0], color=color_fixed, linewidth=linewidth)
 
 
 def plot_hand_3d(coords_xyz, axis, color_fixed=None, linewidth='1'):
@@ -472,7 +474,7 @@ def plot_hand_3d(coords_xyz, axis, color_fixed=None, linewidth='1'):
         if color_fixed is None:
             axis.plot(coords[:, 0], coords[:, 1], coords[:, 2], color=color, linewidth=linewidth)
         else:
-            axis.plot(coords[:, 0], coords[:, 1], coords[:, 2], color_fixed, linewidth=linewidth)
+            axis.plot(coords[:, 0], coords[:, 1], coords[:, 2], color=color_fixed, linewidth=linewidth)
 
     axis.view_init(azim=-90., elev=90.)
 
@@ -673,3 +675,40 @@ def get_stb_ref_curves():
     chpr_b1 = np.array([ 0.56578947,  0.71710526,  0.82236842,  0.88157895,  0.91447368, 0.9375,  0.96052632])
     curve_list.append((thresh_mm, chpr_b1, 'CHPR (AUC=%.3f)' % calc_auc(thresh_mm, chpr_b1)))
     return curve_list
+
+def load_weights(checkpoint_path, discard_list=None, rename_dict=None):
+    """ Loads weights from a snapshot except the ones indicated with discard_list. Others are possibly renamed. """
+    reader = pywrap_tensorflow.NewCheckpointReader(checkpoint_path)
+    var_to_shape_map = reader.get_variable_to_shape_map()
+
+    # Remove everything from the discard list
+    if discard_list is not None:
+        num_disc = 0
+        var_to_shape_map_new = dict()
+        for k, v in var_to_shape_map.items():
+            good = True
+            for dis_str in discard_list:
+                if dis_str in k:
+                    good = False
+
+            if good:
+                var_to_shape_map_new[k] = v
+            else:
+                num_disc += 1
+        var_to_shape_map = dict(var_to_shape_map_new)
+        print('Discarded %d items' % num_disc)
+
+    # rename everything according to rename_dict
+    num_rename = 0
+    var_to_shape_map_new = dict()
+    for name in var_to_shape_map.keys():
+        new_name = name
+        if rename_dict is not None:
+            for rename_str in rename_dict.keys():
+                if rename_str in name:
+                    new_name = new_name.replace(rename_str, rename_dict[rename_str])
+                    num_rename += 1
+        var_to_shape_map_new[new_name] = reader.get_tensor(name)
+    var_to_shape_map = dict(var_to_shape_map_new)
+
+    return var_to_shape_map

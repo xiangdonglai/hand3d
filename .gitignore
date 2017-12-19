@@ -7,3 +7,5 @@ results/
 weights/
 *.pkl
 *.bin
+snapshots_*
+*.json

@@ -58,13 +58,13 @@ _, _, _, _, _, coord3d_pred = net.inference(image_scaled, data['hand_side'], eva
 coord3d_gt = data['keypoint_xyz21']
 
 # Start TF
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
 sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 tf.train.start_queue_runners(sess=sess)
 
 # initialize network with weights used in the paper
 net.init(sess, weight_files=['./weights/handsegnet-rhd.pickle',
-                             './weights/posenet3d-rhd-stb.pickle'])
+                             './weights/posenet3d-RHD.pickle'])
 
 util = EvalUtil()
 # iterate dataset

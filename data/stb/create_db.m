@@ -1,11 +1,12 @@
 %% SCRIPT TO PROCESS the STB dataset by Zhang et al., ‘3d Hand Pose Tracking and Estimation Using Stereo Matching’, 2016 into binary format
 
 % SET THIS to where you have the dataset
-PATH_TO_DATASET = '/home/donglaix/donglaix/Experiments/StereoHandTracking/';
+PATH_TO_DATASET = '/media/posefs0c/Users/donglaix/Experiments/StereoHandTracking/';
 
 %% no more changes below %%
 
-sequences = {'B1Counting', 'B1Random'};
+% sequences = {'B1Counting', 'B1Random'};
+sequences = {'B2Counting', 'B2Random', 'B3Counting', 'B3Random', 'B4Counting', 'B4Random', 'B5Counting', 'B5Random', 'B6Counting', 'B6Random'};
 cam = 'BB'; % thats the camera the annotations are in
 % cam = 'SK';
 
@@ -42,7 +43,8 @@ finger_ind = 1:21;
 
 
 % open binary file
-file = fopen(sprintf('./stb_eval.bin'), 'w');
+% file = fopen(sprintf('./stb_eval.bin'), 'w');
+file = fopen(sprintf('./stb_train_shuffled.bin'), 'w');
 for seq=sequences
     seq_name = seq{1};
     fprintf('Working on %s\n', seq_name)
