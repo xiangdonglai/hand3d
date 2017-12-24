@@ -37,10 +37,11 @@ import numpy as np
 from data.BinaryDbReader import *
 from data.DomeReader import DomeReader
 from nets.PosePriorNetwork import PosePriorNetwork
-from utils.general import EvalUtil, load_weights_from_snapshot, plot_hand_3d, plot_hand
+from utils.general import EvalUtil, load_weights_from_snapshot, plot_hand_3d, plot_hand, hand_size
 import argparse
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import pdb
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--visualize', '-v', action='store_true')
@@ -73,16 +74,17 @@ coord3d_gt = data['keypoint_xyz21']
 # Start TF
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
 sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
 # initialize network with weights used in the paper
 if USE_RETRAINED:
     # retrained version: HandSegNet
-    last_cpt = tf.train.latest_checkpoint('./snapshots_lifting_%s_dome/' % VARIANT)
+    last_cpt = tf.train.latest_checkpoint('./snapshots_lifting_%s_dome_125/' % VARIANT)
     assert last_cpt is not None, "Could not locate snapshot to load. Did you already train the network?"
     load_weights_from_snapshot(sess, last_cpt, discard_list=['Adam', 'global_step', 'beta'])
 else:
-    net.init(sess, weight_files=['./weights/lifting-%s-dome.pickle' % VARIANT])
+    net.init(sess, weight_files=['./weights/lifting-%s-dome-hs.pickle' % VARIANT])
 
 util = EvalUtil()
 # iterate dataset
@@ -110,8 +112,8 @@ for i in range(dataset.num_samples):
         fig = plt.figure(1)
         print(hand_side_v)
         ax1 = fig.add_subplot(121, projection='3d')
-        plot_hand_3d(coord3d_pred_v, ax1, color_fixed=np.array([0.0, 1.0, 0.0]))
-        plot_hand_3d(keypoint_xyz21, ax1, color_fixed=np.array([1.0, 0.0, 1.0]))
+        plot_hand_3d(coord3d_pred_v, ax1, color_fixed=np.array([0.0, 0.0, 1.0]))
+        plot_hand_3d(keypoint_xyz21, ax1, color_fixed=np.array([1.0, 0.0, 0.0]))
         # plot_hand_3d(coord3d_pred_v, ax1)
         # plot_hand_3d(keypoint_xyz21, ax1)
         ax1.view_init(azim=-90.0, elev=-90.0)  # aligns the 3d coord with the camera view
@@ -126,12 +128,13 @@ for i in range(dataset.num_samples):
             v, u = np.unravel_index(np.argmax(scoremap_v[:, :, i]), (s[0], s[1]))
             keypoint_coords[i, 0] = v
             keypoint_coords[i, 1] = u
-        plot_hand(keypoint_coords, ax2, color_fixed=np.array([0.0, 1.0, 0.0]))
+        plot_hand(keypoint_coords, ax2, color_fixed=np.array([1.0, 0.0, 0.0]))
         plt.gca().invert_yaxis()
         plt.xlabel('x')
         plt.ylabel('y')
 
         plt.show()
+        # pdb.set_trace()
 
 # Output results
 mean, median, auc, _, _ = util.get_measures(0.0, 0.050, 20)

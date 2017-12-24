@@ -4,6 +4,7 @@ import pickle, json
 import numpy as np
 import numpy.linalg as nl
 from utils.canonical_trafo import canonical_trafo, flip_right_hand
+from utils.general import hand_size_tf
 
 def project2D(joints, calib, imgwh=None, applyDistort=True):
     """
@@ -134,8 +135,10 @@ class DomeReader(object):
         kp_coord_xyz_root = kp_coord_xyz21[0, :] # this is the palm coord
         kp_coord_xyz21_rel = kp_coord_xyz21 - kp_coord_xyz_root  # relative coords in metric coords
         index_root_bone_length = tf.sqrt(tf.reduce_sum(tf.square(kp_coord_xyz21_rel[12, :] - kp_coord_xyz21_rel[11, :])))
-        data_dict['keypoint_scale'] = index_root_bone_length
-        data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / index_root_bone_length  # normalized by length of 12->11
+        # data_dict['keypoint_scale'] = index_root_bone_length
+        # data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / index_root_bone_length  # normalized by length of 12->11
+        data_dict['keypoint_scale'] = hand_size_tf(kp_coord_xyz21_rel)
+        data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / data_dict['keypoint_scale']
 
         # calculate viewpoint and coords in canonical coordinates
         cond_left = tf.logical_and(tf.cast(tf.ones_like(kp_coord_xyz21), tf.bool), tf.logical_not(hand_side))
@@ -171,6 +174,7 @@ class DomeReader(object):
             crop_size_best = tf.cond(tf.reduce_all(tf.is_finite(crop_size_best)), lambda: crop_size_best,
                                   lambda: tf.constant(200.0))
             crop_size_best.set_shape([])
+            crop_size_best *= 1.25
 
             # calculate necessary scaling
             scale = tf.cast(self.crop_size, tf.float32) / crop_size_best

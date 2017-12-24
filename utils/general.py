@@ -20,6 +20,7 @@ from __future__ import print_function, unicode_literals
 import tensorflow as tf
 from tensorflow.python import pywrap_tensorflow
 import numpy as np
+import numpy.linalg as nl
 import math
 
 
@@ -414,12 +415,18 @@ def plot_hand(coords_hw, axis, color_fixed=None, linewidth='1'):
             continue
         if color_fixed is None:
             axis.plot(coords[:, 1], coords[:, 0], color=color, linewidth=linewidth)
+            axis.scatter(coords[:, 1], coords[:, 0])
         else:
             axis.plot(coords[:, 1], coords[:, 0], color=color_fixed, linewidth=linewidth)
+            axis.scatter(coords[:, 1], coords[:, 0], color=color_fixed)
 
 
 def plot_hand_3d(coords_xyz, axis, color_fixed=None, linewidth='1'):
     """ Plots a hand stick figure into a matplotlib figure. """
+    if color_fixed is None:
+        axis.scatter(coords_xyz[:, 0], coords_xyz[:, 1], coords_xyz[:, 2])
+    else:
+        axis.scatter(coords_xyz[:, 0], coords_xyz[:, 1], coords_xyz[:, 2], color=color_fixed)
     colors = np.array([[0., 0., 0.5],
                        [0., 0., 0.73172906],
                        [0., 0., 0.96345811],
@@ -712,3 +719,60 @@ def load_weights(checkpoint_path, discard_list=None, rename_dict=None):
     var_to_shape_map = dict(var_to_shape_map_new)
 
     return var_to_shape_map
+
+def hand_size(coords_xyz):
+    bones = [(0, 4),
+         (4, 3),
+         (3, 2),
+         (2, 1),
+         (0, 8),
+         (8, 7),
+         (7, 6),
+         (6, 5),
+         (0, 12),
+         (12, 11),
+         (11, 10),
+         (10, 9),
+         (0, 16),
+         (16, 15),
+         (15, 14),
+         (14, 13),
+         (0, 20),
+         (20, 19),
+         (19, 18),
+         (18, 17)]
+    s = 0.0
+    for conn in bones:
+        x1 = coords_xyz[conn[0], :]
+        x2 = coords_xyz[conn[1], :]
+        s += nl.norm(x1 - x2)
+
+    return s
+
+def hand_size_tf(coords_xyz):
+    bones = [(0, 4),
+         (4, 3),
+         (3, 2),
+         (2, 1),
+         (0, 8),
+         (8, 7),
+         (7, 6),
+         (6, 5),
+         (0, 12),
+         (12, 11),
+         (11, 10),
+         (10, 9),
+         (0, 16),
+         (16, 15),
+         (15, 14),
+         (14, 13),
+         (0, 20),
+         (20, 19),
+         (19, 18),
+         (18, 17)]
+    s = tf.Variable(initial_value=0.0, trainable=False, name='scale', dtype=tf.float32)
+    for conn in bones:
+        x1 = coords_xyz[conn[0], :]
+        x2 = coords_xyz[conn[1], :]
+        s += tf.sqrt(tf.reduce_sum(tf.square(x1 - x2)))
+    return s

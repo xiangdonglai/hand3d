@@ -64,7 +64,7 @@ tf.train.start_queue_runners(sess=sess)
 
 # initialize network with weights used in the paper
 net.init(sess, weight_files=['./weights/handsegnet-rhd.pickle',
-                             './weights/posenet3d-RHD.pickle'])
+                             './weights/posenet3d-rhd-stb.pickle'])
 
 util = EvalUtil()
 # iterate dataset
@@ -114,4 +114,5 @@ if type(dataset) == BinaryDbReaderSTB:
     ax.set_xlabel('threshold in mm')
     ax.set_ylabel('PCK')
     plt.legend(loc='lower right')
-    plt.show()
+    plt.savefig('eval_full.png')
+    # plt.show()

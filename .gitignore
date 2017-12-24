@@ -9,3 +9,4 @@ weights/
 *.bin
 snapshots_*
 *.json
+*.png

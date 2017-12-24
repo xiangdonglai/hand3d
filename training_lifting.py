@@ -24,7 +24,8 @@ import sys
 from nets.PosePriorNetwork import PosePriorNetwork
 from data.BinaryDbReader import BinaryDbReader
 from data.DomeReader import DomeReader
-from utils.general import LearningRateScheduler
+from utils.general import LearningRateScheduler, hand_size
+# import pdb
 
 def visualize(scoremap, hand_side, rot_mat, coord3d_can, coord3d, coord2d):
     import pdb
@@ -84,18 +85,18 @@ train_para = {'lr': [1e-4, 1e-5],
               'max_iter': 120000,
               'show_loss_freq': 100,
               'snapshot_freq': 5000,
-              'snapshot_dir': 'snapshots_lifting_%s_dome' % VARIANT}
+              'snapshot_dir': 'snapshots_lifting_%s_my' % VARIANT}
 
 # get dataset
-# dataset = BinaryDbReader(mode='training',
+dataset = BinaryDbReader(mode='training',
+                         batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
+                         coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False)
+# dataset = DomeReader(mode='training',
 #                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
 #                          coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False)
 # dataset = DomeReader(mode='training',
 #                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
-#                          coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False)
-dataset = DomeReader(mode='training',
-                         batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
-                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
+#                          coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
 
 # build network graph
 data = dataset.get()
@@ -115,6 +116,7 @@ _, coord3d_pred, R = net.inference(data['scoremap'], data['hand_side'], evaluati
 # Start TF
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
 sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
 # Loss
