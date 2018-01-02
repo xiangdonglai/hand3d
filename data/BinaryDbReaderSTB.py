@@ -20,7 +20,7 @@ import os
 
 import tensorflow as tf
 
-from utils.general import crop_image_from_xy
+from utils.general import crop_image_from_xy, hand_size_tf
 from utils.canonical_trafo import canonical_trafo, flip_right_hand
 from utils.relative_trafo import bone_rel_trafo
 
@@ -53,9 +53,9 @@ class BinaryDbReaderSTB(object):
         """
         self.num_samples = 0
         if mode == 'training':
-            # self.path_to_db = './data/stb_train_shuffled.bin'
+            self.path_to_db = './data/stb/stb_train_shuffled.bin'
             self.num_samples = 30000
-            assert 0, "This set is not for training!"
+            # assert 0, "This set is not for training!"
         elif mode == 'evaluation':
             self.path_to_db = './data/stb/stb_eval.bin'
             self.num_samples = 6000
@@ -156,7 +156,7 @@ class BinaryDbReaderSTB(object):
         data_dict['keypoint_vis21'] = keypoint_vis21
 
         if self.coord_uv_noise:
-            noise = tf.truncated_normal([42, 2], mean=0.0, stddev=self.coord_uv_noise_sigma)
+            noise = tf.truncated_normal([21, 2], mean=0.0, stddev=self.coord_uv_noise_sigma)
             keypoint_uv21 += noise
 
         data_dict['keypoint_uv21'] = keypoint_uv21
@@ -194,8 +194,10 @@ class BinaryDbReaderSTB(object):
         kp_coord_xyz_root = keypoint_xyz21[0, :] # this is the palm coord
         kp_coord_xyz21_rel = keypoint_xyz21 - kp_coord_xyz_root  # relative coords in metric coords
         index_root_bone_length = tf.sqrt(tf.reduce_sum(tf.square(kp_coord_xyz21_rel[12, :] - kp_coord_xyz21_rel[11, :])))
-        data_dict['keypoint_scale'] = index_root_bone_length
-        data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / index_root_bone_length  # normalized by length of 12->11
+        # data_dict['keypoint_scale'] = index_root_bone_length
+        # data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / index_root_bone_length  # normalized by length of 12->11
+        data_dict['keypoint_scale'] = hand_size_tf(kp_coord_xyz21_rel)
+        data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / data_dict['keypoint_scale']
 
         # calculate local coordinates
         kp_coord_xyz21_local = bone_rel_trafo(data_dict['keypoint_xyz21_normed'])
@@ -248,6 +250,7 @@ class BinaryDbReaderSTB(object):
             crop_size_best = tf.cond(tf.reduce_all(tf.is_finite(crop_size_best)), lambda: crop_size_best,
                                   lambda: tf.constant(200.0))
             crop_size_best.set_shape([])
+            crop_size_best *= 1.25
 
             # calculate necessary scaling
             scale = tf.cast(self.crop_size, tf.float32) / crop_size_best
@@ -415,7 +418,7 @@ if __name__ == '__main__':
     import numpy as np
 
     # Test functionality: BASIC
-    dataset = BinaryDbReaderSTB(mode='evaluation')
+    dataset = BinaryDbReaderSTB(mode='training', use_wrist_coord=False)
     data = dataset.get()
     session = tf.Session()
     tf.train.start_queue_runners(sess=session)

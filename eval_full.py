@@ -35,11 +35,19 @@
 from __future__ import print_function, unicode_literals
 import tensorflow as tf
 import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import argparse
+import pdb
 
 from data.BinaryDbReader import *
 from data.BinaryDbReaderSTB import *
 from nets.ColorHandPose3DNetwork import ColorHandPose3DNetwork
-from utils.general import EvalUtil, get_stb_ref_curves, calc_auc
+from utils.general import EvalUtil, get_stb_ref_curves, calc_auc, plot_hand_3d
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--visualize', '-v', action='store_true')
+args = parser.parse_args()
 
 # get dataset
 # dataset = BinaryDbReader(mode='evaluation', shuffle=False, use_wrist_coord=False)
@@ -54,28 +62,30 @@ net = ColorHandPose3DNetwork()
 
 # feed through network
 evaluation = tf.placeholder_with_default(True, shape=())
-_, _, _, _, _, coord3d_pred = net.inference(image_scaled, data['hand_side'], evaluation)
+_, _, _, _, scoremap, coord3d_pred, coord3d_can, rot_mat = net.inference(image_scaled, data['hand_side'], evaluation)
 coord3d_gt = data['keypoint_xyz21']
 
 # Start TF
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
 sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
 # initialize network with weights used in the paper
 net.init(sess, weight_files=['./weights/handsegnet-rhd.pickle',
-                             './weights/posenet3d-rhd-stb.pickle'])
+                             './weights/posenet3d-dome-hs-jft-new.pickle'])
 
 util = EvalUtil()
 # iterate dataset
 for i in range(dataset.num_samples):
     # get prediction
-    keypoint_xyz21, keypoint_vis21, keypoint_scale, coord3d_pred_v = sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], coord3d_pred])
+    keypoint_xyz21, keypoint_vis21, keypoint_scale, coord3d_pred_v, image_scaled_v, coord3d_can_v, rot_mat_v, scoremap_v = sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], coord3d_pred, image_scaled, coord3d_can, rot_mat, scoremap])
 
     keypoint_xyz21 = np.squeeze(keypoint_xyz21)
     keypoint_vis21 = np.squeeze(keypoint_vis21)
     coord3d_pred_v = np.squeeze(coord3d_pred_v)
     keypoint_scale = np.squeeze(keypoint_scale)
+    image_scaled_v = np.squeeze((image_scaled_v+0.5)*255).astype(np.uint8)
 
     # rescale to meters
     coord3d_pred_v *= keypoint_scale
@@ -87,6 +97,21 @@ for i in range(dataset.num_samples):
 
     if (i % 100) == 0:
         print('%d / %d images done: %.3f percent' % (i, dataset.num_samples, i*100.0/dataset.num_samples))
+
+        if args.visualize:
+            fig = plt.figure(1)
+            ax1 = fig.add_subplot(121, projection='3d')
+            plot_hand_3d(coord3d_pred_v, ax1, color_fixed=np.array([0.0, 0.0, 1.0]))
+            plot_hand_3d(keypoint_xyz21, ax1, color_fixed=np.array([1.0, 0.0, 0.0]))
+            ax1.view_init(azim=-90.0, elev=-90.0)  # aligns the 3d coord with the camera view
+            plt.xlabel('x')
+            plt.ylabel('y')
+
+            ax2 = fig.add_subplot(122)
+            plt.imshow(image_scaled_v)
+
+            plt.show()
+            # pdb.set_trace()
 
 # Output results
 mean, median, auc, pck_curve_all, threshs = util.get_measures(0.0, 0.050, 20)  # rainier: Should lead to 0.764 / 9.405 / 12.210
@@ -115,4 +140,4 @@ if type(dataset) == BinaryDbReaderSTB:
     ax.set_ylabel('PCK')
     plt.legend(loc='lower right')
     plt.savefig('eval_full.png')
-    # plt.show()
+    plt.show()

@@ -2,18 +2,19 @@ import tensorflow as tf
 from utils.general import load_weights
 import pickle
 
-snapshot_dir = 'snapshots_lifting_proposed_dome_hs'
-# last_cpt = tf.train.latest_checkpoint(snapshot_dir)
-last_cpt = 'snapshots_lifting_proposed_dome_hs/model-120000'
+# change this
+last_cpt = 'snapshots_joint_dome_hs_jft_new/model-50000'
 assert last_cpt is not None
 weight = load_weights(last_cpt, discard_list=['Adam', 'global_step', 'beta'])
 
-weight3d = './weights/lifting-proposed-dome-hs.pickle'
+# change this
+weight3d = './weights/lifting-dome-hs-jft-new.pickle'
 with open(weight3d, 'wb') as f:
     pickle.dump(weight, f)
 
 weight_origin = './weights/posenet3d-rhd-stb-slr-finetuned.pickle'
-weight_all = './weights/posenet3d-dome-125.pickle'
+# change this
+weight_all = './weights/posenet3d-dome-hs-jft-new.pickle'
 with open(weight_origin, 'rb') as f:
     weight_origin = pickle.load(f)
 for k, v in weight.items():

@@ -22,7 +22,7 @@ import os
 import sys
 
 from nets.PosePriorNetwork import PosePriorNetwork
-from data.BinaryDbReader import BinaryDbReader
+from data.BinaryDbReaderSTB import BinaryDbReaderSTB
 from data.DomeReader import DomeReader
 from utils.general import LearningRateScheduler, hand_size
 # import pdb
@@ -85,18 +85,14 @@ train_para = {'lr': [1e-4, 1e-5],
               'max_iter': 120000,
               'show_loss_freq': 100,
               'snapshot_freq': 5000,
-              'snapshot_dir': 'snapshots_lifting_%s_my' % VARIANT}
+              'org_snapshot_dir': 'snapshots_lifting_%s_my' % VARIANT,
+              'ft_snapshot_dir': 'snapshots_lifting_%s_my_ft' % VARIANT,
+              'snapshot': 'model-120000'}
 
 # get dataset
-dataset = BinaryDbReader(mode='training',
+dataset = BinaryDbReaderSTB(mode='training',
                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
                          coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
-# dataset = DomeReader(mode='training',
-#                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
-#                          coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False)
-# dataset = DomeReader(mode='training',
-#                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
-#                          coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
 
 # build network graph
 data = dataset.get()
@@ -145,11 +141,13 @@ train_op = opt.minimize(loss)
 # init weights
 sess.run(tf.global_variables_initializer())
 saver = tf.train.Saver(max_to_keep=1, keep_checkpoint_every_n_hours=4.0)
+restore = os.path.join(train_para['org_snapshot_dir'], train_para['snapshot'])
+saver.restore(sess, restore)
 
 # snapshot dir
-if not os.path.exists(train_para['snapshot_dir']):
-    os.mkdir(train_para['snapshot_dir'])
-    print('Created snapshot dir:', train_para['snapshot_dir'])
+if not os.path.exists(train_para['ft_snapshot_dir']):
+    os.mkdir(train_para['ft_snapshot_dir'])
+    print('Created snapshot dir:', train_para['ft_snapshot_dir'])
 
 # Training loop
 print('Starting to train ...')
@@ -164,9 +162,9 @@ for i in range(train_para['max_iter']):
         sys.stdout.flush()
 
     if (i % train_para['snapshot_freq']) == 0:
-        saver.save(sess, "%s/model" % train_para['snapshot_dir'], global_step=i)
+        saver.save(sess, "%s/model" % train_para['ft_snapshot_dir'], global_step=i)
         print('Saved a snapshot.')
         sys.stdout.flush()
 
 print('Training finished. Saving final snapshot.')
-saver.save(sess, "%s/model" % train_para['snapshot_dir'], global_step=train_para['max_iter'])
+saver.save(sess, "%s/model" % train_para['ft_snapshot_dir'], global_step=train_para['max_iter'])

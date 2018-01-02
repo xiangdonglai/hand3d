@@ -90,13 +90,13 @@ class ColorHandPose3DNetwork(object):
         keypoints_scoremap = keypoints_scoremap[-1]
 
         # estimate most likely 3D pose
-        keypoint_coord3d = self._inference_pose3d(keypoints_scoremap, hand_side, evaluation)
+        keypoint_coord3d, keypoint_coord3d_can, rot_mat = self._inference_pose3d(keypoints_scoremap, hand_side, evaluation)
 
         # upsample keypoint scoremap
         s = image_crop.get_shape().as_list()
         keypoints_scoremap = tf.image.resize_images(keypoints_scoremap, (s[1], s[2]))
 
-        return hand_scoremap, image_crop, scale_crop, center, keypoints_scoremap, keypoint_coord3d
+        return hand_scoremap, image_crop, scale_crop, center, keypoints_scoremap, keypoint_coord3d, keypoint_coord3d_can, rot_mat
 
     def inference2d(self, image):
         """ Only 2D part of the pipeline: HandSegNet + PoseNet.
@@ -122,10 +122,10 @@ class ColorHandPose3DNetwork(object):
         image_crop = crop_image_from_xy(image, center, self.crop_size, scale=scale_crop)
 
         # detect keypoints in 2D
-        s = image_crop.get_shape().as_list()
+        # s = image_crop.get_shape().as_list()
         keypoints_scoremap = self.inference_pose2d(image_crop)
         keypoints_scoremap = keypoints_scoremap[-1]
-        keypoints_scoremap = tf.image.resize_images(keypoints_scoremap, (s[1], s[2]))
+        # keypoints_scoremap = tf.image.resize_images(keypoints_scoremap, (s[1], s[2]))
         return keypoints_scoremap, image_crop, scale_crop, center
 
     @staticmethod
@@ -244,7 +244,7 @@ class ColorHandPose3DNetwork(object):
         # rotate view back
         coord_xyz_rel_normed = tf.matmul(coord_xyz_can_flip, rot_mat)
 
-        return coord_xyz_rel_normed
+        return coord_xyz_rel_normed, coord_can, rot_mat
 
     def _inference_pose3d_can(self, keypoints_scoremap, hand_side, evaluation, train=False):
         """ Inference of canonical coordinates. """

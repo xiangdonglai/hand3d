@@ -84,7 +84,7 @@ if USE_RETRAINED:
     assert last_cpt is not None, "Could not locate snapshot to load. Did you already train the network?"
     load_weights_from_snapshot(sess, last_cpt, discard_list=['Adam', 'global_step', 'beta'])
 else:
-    net.init(sess, weight_files=['./weights/lifting-%s-dome-hs.pickle' % VARIANT])
+    net.init(sess, weight_files=['./weights/lifting-%s-dome-my.pickle' % VARIANT])
 
 util = EvalUtil()
 # iterate dataset
