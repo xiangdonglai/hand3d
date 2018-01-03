@@ -43,7 +43,7 @@ if __name__ == '__main__':
     # build network
     net = ColorHandPose3DNetwork()
     hand_scoremap_tf, image_crop_tf, scale_tf, center_tf,\
-    keypoints_scoremap_tf, keypoint_coord3d_tf = net.inference(image_tf, hand_side_tf, evaluation)
+    keypoints_scoremap_tf, keypoint_coord3d_tf, _, _ = net.inference(image_tf, hand_side_tf, evaluation)
 
     # Start TF
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)

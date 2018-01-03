@@ -3,7 +3,7 @@ from utils.general import load_weights
 import pickle
 
 # change this
-last_cpt = 'snapshots_joint_dome_hs_jft_new/model-50000'
+last_cpt = 'snapshots_joint_dome_hs_jft_new/model-80000'
 assert last_cpt is not None
 weight = load_weights(last_cpt, discard_list=['Adam', 'global_step', 'beta'])
 

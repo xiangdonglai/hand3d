@@ -37,16 +37,17 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-import argparse
+import argparse, cv2
 import pdb
 
 from data.BinaryDbReader import *
 from data.BinaryDbReaderSTB import *
 from nets.ColorHandPose3DNetwork import ColorHandPose3DNetwork
-from utils.general import EvalUtil, get_stb_ref_curves, calc_auc, plot_hand_3d
+from utils.general import EvalUtil, get_stb_ref_curves, calc_auc, plot_hand_3d, detect_keypoints, trafo_coords, plot_hand
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--visualize', '-v', action='store_true')
+parser.add_argument('--save', '-s', action='store_true')
 args = parser.parse_args()
 
 # get dataset
@@ -62,8 +63,11 @@ net = ColorHandPose3DNetwork()
 
 # feed through network
 evaluation = tf.placeholder_with_default(True, shape=())
-_, _, _, _, scoremap, coord3d_pred, coord3d_can, rot_mat = net.inference(image_scaled, data['hand_side'], evaluation)
+_, image_crop, scale, center, scoremap, coord3d_pred, coord3d_can, rot_mat = net.inference(image_scaled, data['hand_side'], evaluation)
 coord3d_gt = data['keypoint_xyz21']
+
+s = image_crop.get_shape().as_list()
+keypoints_scoremap = tf.image.resize_images(scoremap, (s[1], s[2]))
 
 # Start TF
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
@@ -79,13 +83,19 @@ util = EvalUtil()
 # iterate dataset
 for i in range(dataset.num_samples):
     # get prediction
-    keypoint_xyz21, keypoint_vis21, keypoint_scale, coord3d_pred_v, image_scaled_v, coord3d_can_v, rot_mat_v, scoremap_v = sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], coord3d_pred, image_scaled, coord3d_can, rot_mat, scoremap])
+    keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21_v, coord3d_pred_v, image_scaled_v, coord3d_can_v, rot_mat_v, keypoints_scoremap_v, image_crop_v, \
+        scale_v, center_v, image_scaled_v = \
+        sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], coord3d_pred, image_scaled, 
+        coord3d_can, rot_mat, keypoints_scoremap, image_crop, scale, center, image_scaled])
 
     keypoint_xyz21 = np.squeeze(keypoint_xyz21)
     keypoint_vis21 = np.squeeze(keypoint_vis21)
     coord3d_pred_v = np.squeeze(coord3d_pred_v)
     keypoint_scale = np.squeeze(keypoint_scale)
+    keypoint_uv21_v = np.squeeze(keypoint_uv21_v)
     image_scaled_v = np.squeeze((image_scaled_v+0.5)*255).astype(np.uint8)
+    image_crop_v = np.squeeze((image_crop_v+0.5)*255).astype(np.uint8)
+    keypoints_scoremap_v = np.squeeze(keypoints_scoremap_v)
 
     # rescale to meters
     coord3d_pred_v *= keypoint_scale
@@ -112,6 +122,39 @@ for i in range(dataset.num_samples):
 
             plt.show()
             # pdb.set_trace()
+
+    if args.save:
+        fig = plt.figure(figsize=(12, 6))
+        keypoints2d = detect_keypoints(keypoints_scoremap_v)
+        coord_hw = trafo_coords(keypoints2d, center_v, scale_v, 256)
+        coord_uv21 = keypoint_uv21_v[:, ::-1]/2
+        ax1 = fig.add_subplot(121)
+        plt.imshow(image_scaled_v)
+        plot_hand(coord_hw, ax1, color_fixed=np.array((0., 0., 1.0)))
+        plot_hand(coord_uv21, ax1, color_fixed=np.array((1., 0., 0.0)))
+
+        ax2 = fig.add_subplot(122, projection='3d')
+        plot_hand_3d(coord3d_pred_v, ax2, color_fixed=np.array([0.0, 0.0, 1.0]))
+        plot_hand_3d(keypoint_xyz21, ax2, color_fixed=np.array([1.0, 0.0, 0.0]))
+        ax2.set_xlabel('x')
+        ax2.set_ylabel('y')
+        ax2.set_xlim(-0.1, 0.1)
+        ax2.set_ylim(-0.1, 0.1)
+        ax2.set_zlim(-0.1, 0.1)
+        ax2.view_init(azim=-90.0, elev=-65.0)  # aligns the 3d coord with the camera view
+        plt.tight_layout()
+        # plt.show()
+
+        fig.canvas.draw()
+        figure = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+        figure = figure.reshape(fig.canvas.get_width_height()[::-1] + (3,))[:, :, ::-1]
+
+        plt.clf()
+        plt.close()
+
+        # plt.imshow(figure)
+        # plt.show()
+        cv2.imwrite('../results/{0:04d}.jpg'.format(i), figure)
 
 # Output results
 mean, median, auc, pck_curve_all, threshs = util.get_measures(0.0, 0.050, 20)  # rainier: Should lead to 0.764 / 9.405 / 12.210
