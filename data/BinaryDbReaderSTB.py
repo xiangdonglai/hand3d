@@ -115,11 +115,12 @@ class BinaryDbReaderSTB(object):
         """ READ DATA ITEMS"""
         # Start reader
         reader = tf.FixedLengthRecordReader(header_bytes=0, record_bytes=record_bytes)
-        _, value = reader.read(tf.train.string_input_producer([self.path_to_db]))
+        key, value = reader.read(tf.train.string_input_producer([self.path_to_db]))
 
         # decode to floats
         bytes_read = 0
         data_dict = dict()
+        data_dict['key'] = key
         record_bytes_float32 = tf.decode_raw(value, tf.float32)
 
         # 1. Read keypoint xyz
