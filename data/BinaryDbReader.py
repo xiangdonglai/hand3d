@@ -241,6 +241,7 @@ class BinaryDbReader(object):
         # data_dict['keypoint_scale'] = index_root_bone_length
         # data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / index_root_bone_length  # normalized by length of 12->11
         data_dict['keypoint_scale'] = hand_size_tf(kp_coord_xyz21_rel)
+        data_dict['index_scale'] = index_root_bone_length
         data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / data_dict['keypoint_scale']
 
         # calculate local coordinates

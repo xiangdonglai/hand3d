@@ -5,52 +5,9 @@ import numpy as np
 import numpy.linalg as nl
 from utils.canonical_trafo import canonical_trafo, flip_right_hand
 from utils.general import hand_size_tf
+from utils.openpose import random_rotate, project_tf
 
-def project2D(joints, calib, imgwh=None, applyDistort=True):
-    """
-    Input:
-    joints: N * 3 numpy array.
-    calib: a dict containing 'R', 'K', 't', 'distCoef' (numpy array)
-
-    Output:
-    pt: 2 * N numpy array
-    inside_img: (N, ) numpy array (bool)
-    """
-    x = np.dot(calib['R'], joints.T) + calib['t']
-    xp = x[:2, :] / x[2, :]
-
-    if applyDistort:
-        X2 = xp[0, :] * xp[0, :]
-        Y2 = xp[1, :] * xp[1, :]
-        XY = X2 * Y2
-        R2 = X2 + Y2
-        R4 = R2 * R2
-        R6 = R4 * R2
-
-        dc = calib['distCoef']
-        radial = 1.0 + dc[0] * R2 + dc[1] * R4 + dc[4] * R6
-        tan_x = 2.0 * dc[2] * XY + dc[3] * (R2 + 2.0 * X2)
-        tan_y = 2.0 * dc[3] * XY + dc[2] * (R2 + 2.0 * Y2)
-
-        # xp = [radial;radial].*xp(1:2,:) + [tangential_x; tangential_y]
-        xp[0, :] = radial * xp[0, :] + tan_x
-        xp[1, :] = radial * xp[1, :] + tan_y
-
-    # pt = bsxfun(@plus, cam.K(1:2,1:2)*xp, cam.K(1:2,3))';
-    pt = np.dot(calib['K'][:2, :2], xp) + calib['K'][:2, 2].reshape((2, 1))
-
-    if imgwh is not None:
-        assert len(imgwh) == 2
-        imw, imh = imgwh
-        winside_img = np.logical_and(pt[0, :] > -0.5, pt[0, :] < imw-0.5) 
-        hinside_img = np.logical_and(pt[1, :] > -0.5, pt[1, :] < imh-0.5) 
-        inside_img = np.logical_and(winside_img, hinside_img) 
-        inside_img = np.logical_and(inside_img, R2 < 1.0) 
-        return pt.T, x.T, inside_img
-
-    return pt.T, x.T
-
-class DomeReader(object):
+class DomeAugReader(object):
 
     def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False,
         coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False, a4=False):
@@ -77,22 +34,15 @@ class DomeReader(object):
         with open(self.camera_file, 'rb') as f:
             self.camera_data = pickle.load(f, encoding='latin1')
 
-        if mode == 'training':
-            t_data = json_data['training_data']
-        else:
-            assert mode == 'evaluation'
-            t_data = json_data['testing_data']
+        assert mode == 'training'
+        training_data = json_data['training_data']
 
         if a4:
             self.path_to_db = './data/hand_data_a4.json'
             self.camera_file = './data/camera_data_a4.pkl'
             with open(self.path_to_db) as f:
                 json_data_a4 = json.load(f)
-            if mode == 'training':
-                t_data += json_data_a4['training_data']
-            else:
-                assert mode == 'evaluation'
-                t_data += json_data_a4['testing_data']
+            training_data += json_data_a4['training_data']
 
             with open(self.camera_file, 'rb') as f:
                 camera_data_a4 = pickle.load(f, encoding='latin1')
@@ -105,33 +55,45 @@ class DomeReader(object):
 
         # Building a list of tensors
         joints3d = []
-        joints2d = []
-        Rs = []
+        calibKs = []
+        calibRs = []
+        calibts = []
         hand_sides = []
-        for ihand, hand3d in enumerate(t_data):
+        for ihand, hand3d in enumerate(training_data):
             joint3d = np.array(hand3d['hand3d']).reshape(-1, 3)
             for i in (1, 5, 9, 13, 17):
                 joint3d[i:i+4] = joint3d[i+3:i-1:-1] # reverse the order of fingers (from palm to tip)
             for camIdx in hand3d['hand2d']:
                 seqName = hand3d['seqName']
                 calib = self.camera_data[seqName][camIdx]
-                joint2d, joint3d_rotated = project2D(joint3d, calib, applyDistort=False)
-                joints3d.append(joint3d_rotated)
-                joints2d.append(joint2d)
+                calibK = calib['K']
+                calibR = calib['R']
+                calibt = calib['t'].ravel()
+                joints3d.append(joint3d)
+                calibKs.append(calibK)
+                calibRs.append(calibR)
+                calibts.append(calibt)
                 hand_sides.append(hand3d['lr'])
 
         joints3d = np.array(joints3d, dtype=np.float32)
-        joints2d = np.array(joints2d, dtype=np.float32)
+        calibRs = np.array(calibRs, dtype=np.float32)
+        calibKs = np.array(calibKs, dtype=np.float32)
+        calibts = np.array(calibts, dtype=np.float32)
         hand_sides = np.array(hand_sides, dtype=bool)
 
         self.num_samples = len(joints3d)
         self.joints3d = tf.constant(joints3d) # 94221, 21, 3
-        self.joints2d = tf.constant(joints2d) # 94221, 21, 2
+        self.calibRs = tf.constant(calibRs)
+        self.calibKs = tf.constant(calibKs)
+        self.calibts = tf.constant(calibts)
         self.hand_sides = tf.constant(hand_sides) # 94221, 
 
-    def get(self):
-
-        [joint3d, joint2d, hand_side] = tf.train.slice_input_producer([self.joints3d, self.joints2d, self.hand_sides], shuffle=False)
+    def get(self, augment=True, slight=False):
+        [joint3d, calibK, calibR, calibt, hand_side] = tf.train.slice_input_producer([self.joints3d, self.calibKs, self.calibRs, self.calibts, self.hand_sides], shuffle=False)
+        if augment:
+            # perform augment by rotation
+            joint3d = random_rotate(joint3d, slight)
+        joint2d, joint3d = project_tf(joint3d, calibK, calibR, calibt)
         keypoint_xyz21 = joint3d
         keypoint_uv21 = joint2d
         if not self.use_wrist_coord:
@@ -158,7 +120,6 @@ class DomeReader(object):
         # data_dict['keypoint_scale'] = index_root_bone_length
         # data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / index_root_bone_length  # normalized by length of 12->11
         data_dict['keypoint_scale'] = hand_size_tf(kp_coord_xyz21_rel)
-        data_dict['index_scale'] = index_root_bone_length
         data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / data_dict['keypoint_scale']
 
         # calculate viewpoint and coords in canonical coordinates
@@ -296,7 +257,7 @@ class DomeReader(object):
             return scoremap
 
 if __name__ == '__main__':
-    d = DomeReader(mode='training',
+    d = DomeAugReader(mode='training',
                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
-                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True)
+                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
     d.get()

@@ -45,6 +45,7 @@ import pdb
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--visualize', '-v', action='store_true')
+parser.add_argument('--index_scale', '-i', action='store_true')
 args = parser.parse_args()
 
 # Chose which variant to evaluate
@@ -57,6 +58,7 @@ VARIANT = 'proposed'
 
 # get dataset
 dataset = BinaryDbReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False)
+# dataset = DomeReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, a4=False)
 # dataset = DomeReader(mode='training', shuffle=False, hand_crop=True, use_wrist_coord=False)
 
 # build network graph
@@ -84,20 +86,24 @@ if USE_RETRAINED:
     assert last_cpt is not None, "Could not locate snapshot to load. Did you already train the network?"
     load_weights_from_snapshot(sess, last_cpt, discard_list=['Adam', 'global_step', 'beta'])
 else:
-    net.init(sess, weight_files=['./weights/lifting-%s-dome-my.pickle' % VARIANT])
+    net.init(sess, weight_files=['./weights/lifting-%s-domeaug-a4.pickle' % VARIANT])
 
 util = EvalUtil()
 # iterate dataset
 for i in range(dataset.num_samples):
     # get prediction
-    keypoint_xyz21, keypoint_scale, coord3d_pred_v, coord3d_v, hand_side_v, scoremap_v = sess.run([data['keypoint_xyz21'], data['keypoint_scale'], coord3d_pred, coord3d, data['hand_side'], data['scoremap']])
+    keypoint_xyz21, keypoint_scale, coord3d_pred_v, coord3d_v, hand_side_v, scoremap_v, index_scale \
+        = sess.run([data['keypoint_xyz21'], data['keypoint_scale'], coord3d_pred, coord3d, data['hand_side'], data['scoremap'], data['index_scale']])
 
     keypoint_xyz21 = np.squeeze(keypoint_xyz21)
     keypoint_scale = np.squeeze(keypoint_scale)
     coord3d_pred_v = np.squeeze(coord3d_pred_v)
 
     # rescale to meters
-    coord3d_pred_v *= keypoint_scale
+    if args.index_scale:
+        coord3d_pred_v *= index_scale
+    else:
+        coord3d_pred_v *= keypoint_scale
 
     # center gt
     keypoint_xyz21 -= keypoint_xyz21[0, :]

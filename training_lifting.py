@@ -24,6 +24,7 @@ import sys
 from nets.PosePriorNetwork import PosePriorNetwork
 from data.BinaryDbReader import BinaryDbReader
 from data.DomeReader import DomeReader
+from data.DomeAugReader import DomeAugReader
 from utils.general import LearningRateScheduler, hand_size
 # import pdb
 
@@ -80,26 +81,32 @@ VARIANT = 'proposed'
 #               'show_loss_freq': 1000,
 #               'snapshot_freq': 5000,
 #               'snapshot_dir': 'snapshots_lifting_%s_dome' % VARIANT}
-train_para = {'lr': [1e-4, 1e-5],
-              'lr_iter': [60000],
-              'max_iter': 120000,
+train_para = {'lr': [1e-4, 1e-5, 1e-6],
+              'lr_iter': [40000, 20000],
+              'max_iter': 80000,
               'show_loss_freq': 100,
               'snapshot_freq': 5000,
-              'snapshot_dir': 'snapshots_lifting_%s_my' % VARIANT}
+              'snapshot_dir': 'snapshots_lifting_%s_domeaug_slight' % VARIANT}
 
 # get dataset
-dataset = BinaryDbReader(mode='training',
-                         batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
-                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
+# dataset = BinaryDbReader(mode='training',
+#                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
+#                          coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
 # dataset = DomeReader(mode='training',
 #                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
 #                          coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False)
 # dataset = DomeReader(mode='training',
 #                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
 #                          coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
+dataset = DomeAugReader(mode='training',
+                         batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
+                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=False)
+# dataset = DomeReader(mode='training',
+#                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
+#                          coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True)
 
 # build network graph
-data = dataset.get()
+data = dataset.get(slight=True)
 
 # build network
 net = PosePriorNetwork(VARIANT)
@@ -114,7 +121,7 @@ _, coord3d_pred, R = net.inference(data['scoremap'], data['hand_side'], evaluati
 # coord_xyz_rel_normed = tf.matmul(coord_xyz_can_flip, data['rot_mat'])
 
 # Start TF
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
 sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
@@ -144,7 +151,7 @@ train_op = opt.minimize(loss)
 
 # init weights
 sess.run(tf.global_variables_initializer())
-saver = tf.train.Saver(max_to_keep=1, keep_checkpoint_every_n_hours=4.0)
+saver = tf.train.Saver(max_to_keep=8, keep_checkpoint_every_n_hours=4.0)
 
 # snapshot dir
 if not os.path.exists(train_para['snapshot_dir']):

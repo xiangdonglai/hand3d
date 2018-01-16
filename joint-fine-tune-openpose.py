@@ -23,40 +23,43 @@ import sys
 
 from nets.ColorHandPose3DNetwork import ColorHandPose3DNetwork
 from data.BinaryDbReaderSTB import BinaryDbReaderSTB
+from openpose.OpenposeSTBReader import OpenposeSTBReader
 from utils.general import LearningRateScheduler, hand_size
 # import pdb
 
 # training parameters
-# train_para = {'lr': [1e-5, 1e-6],
-#               'lr_iter': [60000],
-#               'max_iter': 80000,
-#               'show_loss_freq': 1000,
-#               'snapshot_freq': 5000,
-#               'snapshot_dir': 'snapshots_lifting_%s_dome' % VARIANT}
 train_para = {'lr': [1e-5, 1e-6],
               'lr_iter': [40000],
               'max_iter': 80000,
               'show_loss_freq': 100,
               'snapshot_freq': 5000,
-              'org_weight': './weights/posenet3d-domeaug.pickle',
-              'ft_snapshot_dir': 'snapshots_joint_domeaug',
-              }
+              'org_weight': './weights/posenet3d-dome-hs.pickle',
+              'ft_snapshot_dir': 'snapshots_joint_dome_hs_jft_openpose'}
+# train_para = {'lr': [1e-5, 1e-6],
+#               'lr_iter': [40000],
+#               'max_iter': 80000,
+#               'show_loss_freq': 100,
+#               'snapshot_freq': 5000,
+#               'org_weight': './weights/posenet3d-my.pickle',
+#               'ft_snapshot_dir': 'snapshots_joint_my_jft_openpose',
+#               }
 
 # get dataset
 dataset = BinaryDbReaderSTB(mode='training',
-                         batch_size=8, shuffle=True, hand_crop=False, use_wrist_coord=False)
+                         batch_size=8, shuffle=False, hand_crop=False, use_wrist_coord=False)
+openpose_dataset = OpenposeSTBReader(mode='training', batch_size=8, shuffle=False, hand_crop=True, use_wrist_coord=False)
 
 # build network graph
 data = dataset.get()
+openpose_data = openpose_dataset.get()
 
 # build network
 net = ColorHandPose3DNetwork()
 
 # feed trough network
-image_scaled = tf.image.resize_images(data['image'], (240, 320))
+scoremap_pooled = tf.nn.avg_pool(openpose_data['scoremap'], ksize=[1, 8, 8, 1], strides=[1, 8, 8, 1], padding='SAME')
 evaluation = tf.placeholder_with_default(True, shape=())
-keypoints_scoremap, _, _, _ = net.inference2d(image_scaled)
-_, coord3d_pred, R = net._inference_pose3d(keypoints_scoremap, data['hand_side'], evaluation, train=True)
+_, coord3d_pred, R = net._inference_pose3d(scoremap_pooled, openpose_data['hand_side'], evaluation, train=True)
 
 # Start TF
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
@@ -78,7 +81,7 @@ train_op = opt.minimize(loss)
 
 # init weights
 sess.run(tf.global_variables_initializer())
-net.init(sess, weight_files=['./weights/handsegnet-rhd.pickle', train_para['org_weight']])
+net.init(sess, weight_files=['./weights/handsegnet-rhd.pickle', train_para['org_weight']], exclude_var_list=['HandSegNet', 'PoseNet2D'])
 saver = tf.train.Saver(max_to_keep=None)
 
 # snapshot dir
@@ -89,7 +92,7 @@ if not os.path.exists(train_para['ft_snapshot_dir']):
 # Training loop
 print('Starting to train ...')
 for i in range(train_para['max_iter']):
-    _, loss_v, keypoints_scoremap_v = sess.run([train_op, loss, keypoints_scoremap])
+    _, loss_v, openpose_key, key = sess.run([train_op, loss, openpose_data['key'], data['key']])
 
     if (i % train_para['show_loss_freq']) == 0:
         print('Iteration %d\t Loss %.1e' % (i, loss_v))
@@ -99,6 +102,8 @@ for i in range(train_para['max_iter']):
         saver.save(sess, "%s/model" % train_para['ft_snapshot_dir'], global_step=i)
         print('Saved a snapshot.')
         sys.stdout.flush()
+
+    assert (key == openpose_key).all()
 
 print('Training finished. Saving final snapshot.')
 saver.save(sess, "%s/model" % train_para['ft_snapshot_dir'], global_step=train_para['max_iter'])
