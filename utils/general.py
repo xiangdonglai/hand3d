@@ -60,6 +60,32 @@ class NetworkOps(object):
         return out_tensor
 
     @classmethod
+    def conv3d(cls, in_tensor, layer_name, kernel_size, stride, out_chan, trainable=True):
+        with tf.variable_scope(layer_name):
+            in_size = in_tensor.get_shape().as_list()
+
+            strides = [1, stride, stride, stride, 1]
+            kernel_shape = [kernel_size, kernel_size, kernel_size, in_size[4], out_chan]
+
+            # conv
+            kernel = tf.get_variable('weights', kernel_shape, tf.float32,
+                                     tf.contrib.layers.xavier_initializer(), trainable=trainable, collections=['wd', 'variables', 'filters'])
+            tmp_result = tf.nn.conv3d(in_tensor, kernel, strides, padding='SAME')
+
+            # bias
+            biases = tf.get_variable('biases', [kernel_shape[4]], tf.float32,
+                                     tf.constant_initializer(0.0001), trainable=trainable, collections=['wd', 'variables', 'biases'])
+            out_tensor = tf.nn.bias_add(tmp_result, biases, name='out')
+
+            return out_tensor
+
+    @classmethod
+    def conv3d_relu(cls, in_tensor, layer_name, kernel_size, stride, out_chan, trainable=True):
+        tensor = cls.conv3d(in_tensor, layer_name, kernel_size, stride, out_chan, trainable)
+        out_tensor = cls.leaky_relu(tensor, name='out')
+        return out_tensor
+
+    @classmethod
     def max_pool(cls, bottom, name='pool'):
         pooled = tf.nn.max_pool(bottom, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1],
                                 padding='VALID', name=name)
@@ -342,6 +368,22 @@ def detect_keypoints(scoremaps):
         v, u = np.unravel_index(np.argmax(scoremaps[:, :, i]), (s[0], s[1]))
         keypoint_coords[i, 0] = v
         keypoint_coords[i, 1] = u
+    return keypoint_coords
+
+def detect_keypoints_3d(scoremaps):
+    """ Performs detection per scoremap for the hands keypoints. """
+    if len(scoremaps.shape) == 5:
+        scoremaps = np.squeeze(scoremaps)
+    s = scoremaps.shape
+    assert len(s) == 4, "This function was only designed for 3D Scoremaps."
+    assert (s[3] < s[2]) and (s[3] < s[1]) and (s[3] < s[0]), "Probably the input is not correct, because [D, H, W, C] is expected."
+
+    keypoint_coords = np.zeros((s[3], 3))
+    for i in range(s[3]):
+        z, y, x = np.unravel_index(np.argmax(scoremaps[:, :, :, i]), (s[0], s[1], s[2]))
+        keypoint_coords[i, 0] = x
+        keypoint_coords[i, 1] = y
+        keypoint_coords[i, 2] = z
     return keypoint_coords
 
 
@@ -776,3 +818,46 @@ def hand_size_tf(coords_xyz):
         x2 = coords_xyz[conn[1], :]
         s += tf.sqrt(tf.reduce_sum(tf.square(x1 - x2)))
     return s
+
+def create_multiple_gaussian_map_3d(keypoint_3d, output_size, sigma):
+    """ Creates a 3D heatmap for the hand skeleton
+    """
+    with tf.name_scope('create_multiple_gaussian_map_3d'):
+        sigma = tf.cast(sigma, tf.float32)
+        # reverse the order of axis: tensorflow uses NDHWC
+        reverse = keypoint_3d[:, ::-1]
+        centered = reverse - reverse[0, :]
+        max_coord = tf.abs(tf.reduce_max(centered))
+        min_coord = tf.abs(tf.reduce_min(centered))
+        crop_size_best = 2 * tf.maximum(max_coord, min_coord) * 1.25 # 2 for both sides, 1.25 for margin
+
+        scale = tf.cast(output_size, tf.float32) / crop_size_best
+        scaled_center = centered * scale
+
+        x_range = tf.expand_dims(tf.expand_dims(tf.range(output_size, dtype=tf.float32), 1), 2)
+        y_range = tf.expand_dims(tf.expand_dims(tf.range(output_size, dtype=tf.float32), 0), 2)
+        z_range = tf.expand_dims(tf.expand_dims(tf.range(output_size, dtype=tf.float32), 0), 1)
+
+        X = tf.tile(x_range, [1, output_size, output_size]) - tf.cast(output_size//2, tf.float32)
+        Y = tf.tile(y_range, [output_size, 1, output_size]) - tf.cast(output_size//2, tf.float32)
+        Z = tf.tile(z_range, [output_size, output_size, 1]) - tf.cast(output_size//2, tf.float32)
+
+        X = tf.expand_dims(X, -1)
+        Y = tf.expand_dims(Y, -1)
+        Z = tf.expand_dims(Z, -1)
+
+        s = reverse.get_shape().as_list()
+
+        X_b = tf.tile(X, [1, 1, 1, s[0]])
+        Y_b = tf.tile(Y, [1, 1, 1, s[0]])
+        Z_b = tf.tile(Z, [1, 1, 1, s[0]])
+
+        X_b -= scaled_center[:, 0]
+        Y_b -= scaled_center[:, 1]
+        Z_b -= scaled_center[:, 2]
+
+        dist = tf.square(X_b) + tf.square(Y_b) + tf.square(Z_b)
+
+        scoremap_3d = tf.exp(-dist/tf.square(sigma))
+
+        return scoremap_3d, scaled_center

@@ -20,7 +20,7 @@ import os
 
 import tensorflow as tf
 
-from utils.general import crop_image_from_xy, hand_size_tf
+from utils.general import crop_image_from_xy, hand_size_tf, create_multiple_gaussian_map_3d
 from utils.canonical_trafo import canonical_trafo, flip_right_hand
 from utils.relative_trafo import bone_rel_trafo
 
@@ -317,6 +317,7 @@ class BinaryDbReaderSTB(object):
             scoremap *= self.scoremap_dropout_prob
 
         data_dict['scoremap'] = scoremap
+        data_dict['scoremap_3d'], data_dict['scaled_center'] = create_multiple_gaussian_map_3d(data_dict['keypoint_xyz21_normed'], 32, 5)
 
         if self.random_crop_to_size:
             tensor_stack = tf.concat([data_dict['image'],
@@ -397,6 +398,7 @@ class BinaryDbReaderSTB(object):
 
             return scoremap
 
+
     @staticmethod
     def convert_kp(keypoints):
         """ Maps the keypoints into the right order. """
@@ -415,44 +417,44 @@ class BinaryDbReaderSTB(object):
 
 
 if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    import numpy as np
+    # import matplotlib.pyplot as plt
+    # import numpy as np
 
-    # Test functionality: BASIC
-    dataset = BinaryDbReaderSTB(mode='training', use_wrist_coord=False)
-    data = dataset.get()
-    session = tf.Session()
-    tf.train.start_queue_runners(sess=session)
+    # # Test functionality: BASIC
+    # dataset = BinaryDbReaderSTB(mode='training', use_wrist_coord=False)
+    # data = dataset.get()
+    # session = tf.Session()
+    # tf.train.start_queue_runners(sess=session)
 
-    for _ in range(10):
-        # get data from graph
-        image, cam_mat, scoremap, \
-        keypoint_uv, keypoint_xyz, keypoint_vis = session.run([data['image'], data['cam_mat'], data['scoremap'],
-                                                                      data['keypoint_uv21'], data['keypoint_xyz21'], data['keypoint_vis21']])
+    # for _ in range(10):
+    #     # get data from graph
+    #     image, cam_mat, scoremap, \
+    #     keypoint_uv, keypoint_xyz, keypoint_vis = session.run([data['image'], data['cam_mat'], data['scoremap'],
+    #                                                                   data['keypoint_uv21'], data['keypoint_xyz21'], data['keypoint_vis21']])
 
-        keypoint_vis = np.squeeze(keypoint_vis)
-        keypoint_uv = np.squeeze(keypoint_uv)
-        keypoint_xyz = np.squeeze(keypoint_xyz)
-        cam_mat = np.squeeze(cam_mat)
+    #     keypoint_vis = np.squeeze(keypoint_vis)
+    #     keypoint_uv = np.squeeze(keypoint_uv)
+    #     keypoint_xyz = np.squeeze(keypoint_xyz)
+    #     cam_mat = np.squeeze(cam_mat)
 
-        # project into frame
-        keypoint_uv_proj = np.matmul(keypoint_xyz[:, :], np.transpose(cam_mat[:, :]))
-        keypoint_uv_proj = keypoint_uv_proj[:, :2] / keypoint_uv_proj[:, -1:]
+    #     # project into frame
+    #     keypoint_uv_proj = np.matmul(keypoint_xyz[:, :], np.transpose(cam_mat[:, :]))
+    #     keypoint_uv_proj = keypoint_uv_proj[:, :2] / keypoint_uv_proj[:, -1:]
 
-        # show results
-        fig = plt.figure(1)
-        ax1 = fig.add_subplot('221')
-        ax2 = fig.add_subplot('222')
-        ax3 = fig.add_subplot('223')
+    #     # show results
+    #     fig = plt.figure(1)
+    #     ax1 = fig.add_subplot('221')
+    #     ax2 = fig.add_subplot('222')
+    #     ax3 = fig.add_subplot('223')
 
-        image_rgb = ((np.squeeze(image) + 0.5) * 255.0).astype(np.uint8)
-        ax1.imshow(image_rgb)
-        ax1.plot(keypoint_uv[keypoint_vis, 0], keypoint_uv[keypoint_vis, 1], 'ro')
-        ax2.imshow(image_rgb)
-        ax2.plot(keypoint_uv_proj[keypoint_vis, 0], keypoint_uv_proj[keypoint_vis, 1], 'bo')
-        scoremap = np.max(scoremap[0, :, :, :] > 0.8, 2)
-        ax3.imshow(scoremap)
-        plt.show()
+    #     image_rgb = ((np.squeeze(image) + 0.5) * 255.0).astype(np.uint8)
+    #     ax1.imshow(image_rgb)
+    #     ax1.plot(keypoint_uv[keypoint_vis, 0], keypoint_uv[keypoint_vis, 1], 'ro')
+    #     ax2.imshow(image_rgb)
+    #     ax2.plot(keypoint_uv_proj[keypoint_vis, 0], keypoint_uv_proj[keypoint_vis, 1], 'bo')
+    #     scoremap = np.max(scoremap[0, :, :, :] > 0.8, 2)
+    #     ax3.imshow(scoremap)
+    #     plt.show()
 
     # # Test functionality: CROP
     # dataset = BinaryDbReaderSHB(mode='training', shuffle=False, hand_crop=True, crop_center_noise=True)
@@ -486,3 +488,36 @@ if __name__ == '__main__':
     #     ax1.plot(keypoint_uv_proj[keypoint_vis21, 0], keypoint_uv_proj[keypoint_vis21, 1], 'ro')
     #     ax1.plot(keypoint_uv21[keypoint_vis21, 0], keypoint_uv21[keypoint_vis21, 1], 'g+')
     #     plt.show()
+
+    import numpy as np
+    d = BinaryDbReaderSTB(mode='training',
+                         batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False,
+                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
+    data = d.get()
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
+    sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+    sess.run(tf.global_variables_initializer())
+    tf.train.start_queue_runners(sess=sess)
+
+    from utils.general import detect_keypoints_3d, plot_hand_3d
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+
+    for i in range(10):
+        scoremap_3d, keypoint_xyz21_normed, scaled_center = sess.run([data['scoremap_3d'], data['keypoint_xyz21_normed'], data['scaled_center']])
+        scoremap_3d = np.squeeze(scoremap_3d)
+        keypoint_xyz21_normed = np.squeeze(keypoint_xyz21_normed)
+
+        keypoints = detect_keypoints_3d(scoremap_3d).astype(np.float32)
+
+        print(scaled_center)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(121, projection='3d')
+        ax.set_xlim(0, 32)
+        ax.set_ylim(0, 32)
+        ax.set_zlim(0, 32)
+        plot_hand_3d(keypoints, ax)
+        ax = fig.add_subplot(122, projection='3d')
+        plot_hand_3d(keypoint_xyz21_normed, ax)
+        plt.show()

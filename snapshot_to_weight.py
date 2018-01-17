@@ -3,18 +3,18 @@ from utils.general import load_weights
 import pickle
 
 # change this
-last_cpt = 'snapshots_lifting_proposed_domeaug_a4/model-120000'
+last_cpt = 'snapshots_joint_domeaug/model-65000'
 assert last_cpt is not None
 weight = load_weights(last_cpt, discard_list=['Adam', 'global_step', 'beta'])
 
 # change this
-weight3d = './weights/lifting-proposed-domeaug-a4.pickle'
+weight3d = './weights/lifting-domeaug-jft.pickle'
 with open(weight3d, 'wb') as f:
     pickle.dump(weight, f)
 
 weight_origin = './weights/posenet3d-rhd-stb-slr-finetuned.pickle'
 # change this
-weight_all = './weights/posenet3d-domeaug-a4.pickle'
+weight_all = './weights/posenet3d-domeaug-jft.pickle'
 with open(weight_origin, 'rb') as f:
     weight_origin = pickle.load(f)
 for k, v in weight.items():

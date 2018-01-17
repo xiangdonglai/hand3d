@@ -20,7 +20,7 @@ import os
 
 import tensorflow as tf
 
-from utils.general import crop_image_from_xy, hand_size_tf
+from utils.general import crop_image_from_xy, hand_size_tf, create_multiple_gaussian_map_3d
 from utils.canonical_trafo import canonical_trafo, flip_right_hand
 from utils.relative_trafo import bone_rel_trafo
 
@@ -370,6 +370,8 @@ class BinaryDbReader(object):
 
         data_dict['scoremap'] = scoremap
 
+        data_dict['scoremap_3d'] = create_multiple_gaussian_map_3d(data_dict['keypoint_xyz21_normed'], 32, 5)
+
         if self.scale_to_size:
             image, keypoint_uv21, keypoint_vis21 = data_dict['image'], data_dict['keypoint_uv21'], data_dict['keypoint_vis21']
             s = image.get_shape().as_list()
@@ -463,3 +465,32 @@ class BinaryDbReader(object):
             return scoremap
 
 
+if __name__ == '__main__':
+    import numpy as np
+    d = BinaryDbReader(mode='training',
+                         batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False,
+                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
+    data = d.get()
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
+    sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+    sess.run(tf.global_variables_initializer())
+    tf.train.start_queue_runners(sess=sess)
+
+    from utils.general import detect_keypoints_3d, plot_hand_3d
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+
+    for i in range(10):
+
+        scoremap_3d, keypoint_xyz21_normed = sess.run([data['scoremap_3d'], data['keypoint_xyz21_normed']])
+        scoremap_3d = np.squeeze(scoremap_3d)
+        keypoint_xyz21_normed = np.squeeze(keypoint_xyz21_normed)
+
+        keypoints = detect_keypoints_3d(scoremap_3d)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(121, projection='3d')
+        plot_hand_3d(keypoints, ax)
+        ax = fig.add_subplot(122, projection='3d')
+        plot_hand_3d(keypoint_xyz21_normed, ax)
+        plt.show()

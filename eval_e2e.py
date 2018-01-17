@@ -15,23 +15,9 @@
 #  You should have received a copy of the GNU General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-""" Script for evaluation of the full pipeline.
-
-    This allows to reproduce results of Figure 9. But in order to do so you need to get the STB dataset.
-    See README for more information.
-
-    Results for STB-e:
-    Average mean EPE: 12.210 mm
-    Average median EPE: 9.405 mm
-    Area under curve: 0.764 (from 0mm to 50mm)
-    Area under curve: 0.941 (from 30mm to 50mm)
-
-    Results for RHD-e (not in the paper, but a possible baseline for future approaches):
-    Average mean EPE: 35.606 mm
-    Average median EPE: 28.686 mm
-    Area under curve: 0.424 (from 0mm to 50mm)
-    Area under curve: 0.603 (from 30mm to 50mm)
+""" Script for evaluation of the end-to-end method.
 """""
+
 from __future__ import print_function, unicode_literals
 import tensorflow as tf
 import numpy as np
@@ -42,8 +28,8 @@ import pdb
 
 from data.BinaryDbReader import *
 from data.BinaryDbReaderSTB import *
-from nets.ColorHandPose3DNetwork import ColorHandPose3DNetwork
-from utils.general import EvalUtil, get_stb_ref_curves, calc_auc, plot_hand_3d, detect_keypoints, trafo_coords, plot_hand
+from nets.E2ENet import E2ENet
+from utils.general import EvalUtil, get_stb_ref_curves, calc_auc, plot_hand_3d, detect_keypoints, trafo_coords, plot_hand, detect_keypoints_3d, hand_size, load_weights_from_snapshot
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--visualize', '-v', action='store_true')
@@ -52,22 +38,16 @@ args = parser.parse_args()
 
 # get dataset
 # dataset = BinaryDbReader(mode='evaluation', shuffle=False, use_wrist_coord=False)
-dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, use_wrist_coord=False)
+dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, use_wrist_coord=False, hand_crop=True)
 
 # build network graph
 data = dataset.get()
-image_scaled = tf.image.resize_images(data['image'], (240, 320))
-
+image_crop = data['image_crop']
 # build network
-net = ColorHandPose3DNetwork()
+net = E2ENet(32)
 
 # feed through network
-evaluation = tf.placeholder_with_default(True, shape=())
-_, image_crop, scale, center, scoremap, coord3d_pred, coord3d_can, rot_mat = net.inference(image_scaled, data['hand_side'], evaluation)
-coord3d_gt = data['keypoint_xyz21']
-
-s = image_crop.get_shape().as_list()
-keypoints_scoremap = tf.image.resize_images(scoremap, (s[1], s[2]))
+scoremap_3d = net.inference(image_crop)
 
 # Start TF
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
@@ -75,30 +55,27 @@ sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
-# initialize network with weights used in the paper
-net.init(sess, weight_files=['./weights/handsegnet-rhd.pickle',
-                             './weights/posenet3d-domeaug-jft.pickle'])
+cpt = 'snapshots_e2e/model-70000'
+load_weights_from_snapshot(sess, cpt, discard_list=['Adam', 'global_step', 'beta'])
 
 util = EvalUtil()
 # iterate dataset
 for i in range(dataset.num_samples):
     # get prediction
-    keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21_v, coord3d_pred_v, image_scaled_v, coord3d_can_v, rot_mat_v, keypoints_scoremap_v, image_crop_v, \
-        scale_v, center_v, image_scaled_v = \
-        sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], coord3d_pred, image_scaled, 
-        coord3d_can, rot_mat, keypoints_scoremap, image_crop, scale, center, image_scaled])
+    keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21_v, image_crop_v, scoremap_3d_v = \
+        sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, scoremap_3d])
 
     keypoint_xyz21 = np.squeeze(keypoint_xyz21)
     keypoint_vis21 = np.squeeze(keypoint_vis21)
-    coord3d_pred_v = np.squeeze(coord3d_pred_v)
     keypoint_scale = np.squeeze(keypoint_scale)
     keypoint_uv21_v = np.squeeze(keypoint_uv21_v)
-    image_scaled_v = np.squeeze((image_scaled_v+0.5)*255).astype(np.uint8)
     image_crop_v = np.squeeze((image_crop_v+0.5)*255).astype(np.uint8)
-    keypoints_scoremap_v = np.squeeze(keypoints_scoremap_v)
+    scoremap_3d_v = np.squeeze(scoremap_3d_v)
 
     # rescale to meters
-    coord3d_pred_v *= keypoint_scale
+    coord3d_pred_v = detect_keypoints_3d(scoremap_3d_v)
+    coord3d_pred_v -= coord3d_pred_v[0, :]
+    coord3d_pred_v *= keypoint_scale / hand_size(coord3d_pred_v)
 
     # center gt
     keypoint_xyz21 -= keypoint_xyz21[0, :]
@@ -118,7 +95,7 @@ for i in range(dataset.num_samples):
             plt.ylabel('y')
 
             ax2 = fig.add_subplot(122)
-            plt.imshow(image_scaled_v)
+            plt.imshow(image_crop_v)
 
             plt.show()
             # pdb.set_trace()
@@ -182,5 +159,5 @@ if type(dataset) == BinaryDbReaderSTB:
     ax.set_xlabel('threshold in mm')
     ax.set_ylabel('PCK')
     plt.legend(loc='lower right')
-    plt.savefig('eval_full.png')
+    plt.savefig('eval_e2e.png')
     plt.show()
