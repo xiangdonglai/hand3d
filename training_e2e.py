@@ -23,8 +23,23 @@ import sys
 
 from nets.E2ENet import E2ENet
 from data.BinaryDbReaderSTB import BinaryDbReaderSTB
-from utils.general import LearningRateScheduler, hand_size
-# import pdb
+from utils.general import LearningRateScheduler
+
+def visualize(heatmap_3d, image_crop):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+    from utils.general import detect_keypoints_3d, plot_hand_3d
+
+    heatmap_3d = np.squeeze(heatmap_3d)
+    image_crop = np.squeeze(255*(image_crop+0.5)).astype(np.uint8)
+    fig = plt.figure()
+    ax = fig.add_subplot(121)
+    ax.imshow(image_crop[0])
+    ax = fig.add_subplot(122, projection='3d')
+    keypoints = detect_keypoints_3d(heatmap_3d[0]).astype(np.float32)
+    plot_hand_3d(keypoints, ax)
+    plt.show()
 
 # training parameters
 # train_para = {'lr': [1e-5, 1e-6],
@@ -34,8 +49,8 @@ from utils.general import LearningRateScheduler, hand_size
 #               'snapshot_freq': 5000,
 #               'snapshot_dir': 'snapshots_lifting_%s_dome' % VARIANT}
 train_para = {'lr': [1e-4, 1e-5],
-              'lr_iter': [40000],
-              'max_iter': 80000,
+              'lr_iter': [20000],
+              'max_iter': 40000,
               'show_loss_freq': 100,
               'snapshot_freq': 5000,
               'snapshot_dir': 'snapshots_e2e',
@@ -53,7 +68,7 @@ data = dataset.get()
 net = E2ENet(32)
 
 # feed trough network
-heatmap_3d = net.inference(data['image_crop'], train=True)
+heatmap_3d, heatmap_2d = net.inference(data['image_crop'], train=True)
 
 # Start TF
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
@@ -62,8 +77,9 @@ sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
 # Loss
-loss = 0.0
-loss += tf.reduce_mean(tf.square(heatmap_3d - data['scoremap_3d']))
+loss_2d = tf.reduce_mean(tf.square(heatmap_2d - tf.image.resize_images(data['scoremap'], (32, 32))))
+loss_3d = tf.reduce_mean(tf.square(heatmap_3d - data['scoremap_3d']))
+loss = loss_3d + loss_2d
 tf.summary.scalar('loss', loss)
 
 # Solver
@@ -90,11 +106,13 @@ if not os.path.exists(train_para['snapshot_dir']):
 # Training loop
 print('Starting to train ...')
 for i in range(train_para['max_iter']):
-    summary, _, loss_v = sess.run([merged, train_op, loss])
+    summary, _, loss_v, heatmap_3d_v, image_crop_v, loss_3d_v, loss_2d_v = sess.run([merged, train_op, loss, data['scoremap_3d'], data['image_crop'], loss_3d, loss_2d])
     train_writer.add_summary(summary, i)
 
+    # visualize(heatmap_3d_v, image_crop_v)
+
     if (i % train_para['show_loss_freq']) == 0:
-        print('Iteration %d\t Loss %.1e' % (i, loss_v))
+        print('Iteration %d\t Loss %.1e, Loss_3d %.1e, Loss_2d %.1e' % (i, loss_v, loss_3d_v, loss_2d_v))
         sys.stdout.flush()
 
     if (i % train_para['snapshot_freq']) == 0:
@@ -104,5 +122,3 @@ for i in range(train_para['max_iter']):
 
 print('Training finished. Saving final snapshot.')
 saver.save(sess, "%s/model" % train_para['snapshot_dir'], global_step=train_para['max_iter'])
-
-# initial loss: 7.5e-03

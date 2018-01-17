@@ -55,7 +55,7 @@ sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
-cpt = 'snapshots_e2e/model-70000'
+cpt = 'snapshots_e2e/model-10000'
 load_weights_from_snapshot(sess, cpt, discard_list=['Adam', 'global_step', 'beta'])
 
 util = EvalUtil()
