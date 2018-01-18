@@ -47,7 +47,7 @@ image_crop = data['image_crop']
 net = E2ENet(32)
 
 # feed through network
-scoremap_3d = net.inference(image_crop)
+scoremap_3d, scoremap = net.inference(image_crop)
 
 # Start TF
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
@@ -55,15 +55,15 @@ sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
-cpt = 'snapshots_e2e/model-10000'
+cpt = 'snapshots_e2e/model-40000'
 load_weights_from_snapshot(sess, cpt, discard_list=['Adam', 'global_step', 'beta'])
 
 util = EvalUtil()
 # iterate dataset
 for i in range(dataset.num_samples):
     # get prediction
-    keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21_v, image_crop_v, scoremap_3d_v = \
-        sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, scoremap_3d])
+    keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21_v, image_crop_v, scoremap_3d_v, scoremap_v = \
+        sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, scoremap_3d, scoremap])
 
     keypoint_xyz21 = np.squeeze(keypoint_xyz21)
     keypoint_vis21 = np.squeeze(keypoint_vis21)
@@ -71,11 +71,13 @@ for i in range(dataset.num_samples):
     keypoint_uv21_v = np.squeeze(keypoint_uv21_v)
     image_crop_v = np.squeeze((image_crop_v+0.5)*255).astype(np.uint8)
     scoremap_3d_v = np.squeeze(scoremap_3d_v)
+    scoremap_v = np.squeeze(scoremap_v)
 
     # rescale to meters
     coord3d_pred_v = detect_keypoints_3d(scoremap_3d_v)
     coord3d_pred_v -= coord3d_pred_v[0, :]
     coord3d_pred_v *= keypoint_scale / hand_size(coord3d_pred_v)
+    coord2d_v = detect_keypoints(scoremap_v) * 8
 
     # center gt
     keypoint_xyz21 -= keypoint_xyz21[0, :]
@@ -93,9 +95,13 @@ for i in range(dataset.num_samples):
             ax1.view_init(azim=-90.0, elev=-90.0)  # aligns the 3d coord with the camera view
             plt.xlabel('x')
             plt.ylabel('y')
+            ax1.set_xlim(-0.1, 0.1)
+            ax1.set_ylim(-0.1, 0.1)
+            ax1.set_zlim(-0.1, 0.1)
 
             ax2 = fig.add_subplot(122)
             plt.imshow(image_crop_v)
+            plot_hand(coord2d_v, ax2)
 
             plt.show()
             # pdb.set_trace()

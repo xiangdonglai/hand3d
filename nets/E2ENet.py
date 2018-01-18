@@ -57,14 +57,31 @@ class E2ENet(object):
             x = ops.conv_relu(x, 'conv4_4', kernel_size=3, stride=1, out_chan=256, trainable=train)
             x = ops.conv_relu(x, 'conv4_5', kernel_size=3, stride=1, out_chan=256, trainable=train)
             x = ops.conv_relu(x, 'conv4_6', kernel_size=3, stride=1, out_chan=256, trainable=train)
-            encoding = ops.conv(x, 'conv4_7', kernel_size=3, stride=1, out_chan=32, trainable=train)
+            encoding = ops.conv(x, 'conv4_7', kernel_size=3, stride=1, out_chan=128, trainable=train)
 
-            x = ops.conv_relu(encoding, 'conv5_1', kernel_size=3, stride=1, out_chan=32, trainable=train)
-            x = ops.conv_relu(x, 'conv5_2', kernel_size=3, stride=1, out_chan=32, trainable=train)
-            scoremap_2d = ops.conv(x, 'conv5_3', kernel_size=1, stride=1, out_chan=self.num_kp, trainable=train)
+            scoremap_list = []
+            # use encoding to detect initial scoremap
+            x = ops.conv_relu(encoding, 'conv5_1', kernel_size=1, stride=1, out_chan=512, trainable=train)
+            scoremap = ops.conv(x, 'conv5_2', kernel_size=1, stride=1, out_chan=self.num_kp, trainable=train)
+            scoremap_list.append(scoremap)
 
-            encoding_concat = tf.concat([encoding, scoremap_2d], axis=3)
-            x = ops.conv_relu(encoding_concat, 'conv5_4', kernel_size=3, stride=1, out_chan=32, trainable=train)
+            # iterate recurrent part a couple of times
+            layers_per_recurrent_unit = 5
+            num_recurrent_units = 2
+            for pass_id in range(num_recurrent_units):
+                x = tf.concat([scoremap_list[-1], encoding], 3)
+                for rec_id in range(layers_per_recurrent_unit):
+                    x = ops.conv_relu(x, 'conv%d_%d' % (pass_id+6, rec_id+1), kernel_size=7, stride=1, out_chan=128, trainable=train)
+                x = ops.conv_relu(x, 'conv%d_6' % (pass_id+6), kernel_size=1, stride=1, out_chan=128, trainable=train)
+                scoremap = ops.conv(x, 'conv%d_7' % (pass_id+6), kernel_size=1, stride=1, out_chan=self.num_kp, trainable=train)
+                scoremap_list.append(scoremap)
+
+            # x = ops.conv_relu(encoding, 'conv5_1', kernel_size=3, stride=1, out_chan=32, trainable=train)
+            # x = ops.conv_relu(x, 'conv5_2', kernel_size=3, stride=1, out_chan=32, trainable=train)
+            # scoremap_2d = ops.conv(x, 'conv5_3', kernel_size=1, stride=1, out_chan=self.num_kp, trainable=train)
+
+            encoding_concat = tf.concat([encoding] + scoremap_list, axis=3)
+            x = ops.conv_relu(encoding_concat, 'conv_to32', kernel_size=3, stride=1, out_chan=32, trainable=train)
 
             s = x.get_shape().as_list()
             assert s[1] == self.output_size and s[2] == self.output_size and s[3] == self.output_size
@@ -76,8 +93,8 @@ class E2ENet(object):
             out_chan_list = [2, 4, 8, 16]
             for block_id, (layer_num, chan_num) in enumerate(zip(layers_per_block, out_chan_list), 1):
                 for layer_id in range(layer_num):
-                    x = ops.conv3d_relu(x, 'conv{}_{}'.format(block_id+6, layer_id), kernel_size=3, stride=1, out_chan=chan_num, trainable=train)
+                    x = ops.conv3d_relu(x, 'conv3d{}_{}'.format(block_id, layer_id), kernel_size=3, stride=1, out_chan=chan_num, trainable=train)
 
-            x = ops.conv3d(x, 'conv10', kernel_size=1, stride=1, out_chan=self.num_kp, trainable=train)
+            x = ops.conv3d(x, 'conv3d_out', kernel_size=1, stride=1, out_chan=self.num_kp, trainable=train)
 
-        return x, scoremap_2d
+        return x, scoremap_list

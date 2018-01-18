@@ -77,7 +77,7 @@ tf.train.start_queue_runners(sess=sess)
 
 # initialize network with weights used in the paper
 net.init(sess, weight_files=['./weights/handsegnet-rhd.pickle',
-                             './weights/posenet3d-domeaug-jft.pickle'])
+                             './weights/posenet3d-domeaug-a4-jft.pickle'])
 
 util = EvalUtil()
 # iterate dataset

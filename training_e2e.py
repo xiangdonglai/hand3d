@@ -77,7 +77,10 @@ sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
 # Loss
-loss_2d = tf.reduce_mean(tf.square(heatmap_2d - tf.image.resize_images(data['scoremap'], (32, 32))))
+assert len(heatmap_2d) == 3
+loss_2d = 0.0
+for i, pred_item in enumerate(heatmap_2d):
+    loss_2d += tf.reduce_mean(tf.square(pred_item - tf.image.resize_images(data['scoremap'], (32, 32)))) / 3
 loss_3d = tf.reduce_mean(tf.square(heatmap_3d - data['scoremap_3d']))
 loss = loss_3d + loss_2d
 tf.summary.scalar('loss', loss)
