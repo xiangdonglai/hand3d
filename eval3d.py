@@ -58,7 +58,7 @@ VARIANT = 'proposed'
 
 # get dataset
 dataset = BinaryDbReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False)
-# dataset = DomeReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, a4=False)
+# dataset = DomeReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, a4=False, a2=True)
 # dataset = DomeReader(mode='training', shuffle=False, hand_crop=True, use_wrist_coord=False)
 
 # build network graph
@@ -86,7 +86,7 @@ if USE_RETRAINED:
     assert last_cpt is not None, "Could not locate snapshot to load. Did you already train the network?"
     load_weights_from_snapshot(sess, last_cpt, discard_list=['Adam', 'global_step', 'beta'])
 else:
-    net.init(sess, weight_files=['./weights/lifting-%s-domeaug-a4.pickle' % VARIANT])
+    net.init(sess, weight_files=['./weights/lifting-dome-a4-resampled.pickle'])
 
 util = EvalUtil()
 # iterate dataset

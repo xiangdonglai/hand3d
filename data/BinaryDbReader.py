@@ -370,7 +370,7 @@ class BinaryDbReader(object):
 
         data_dict['scoremap'] = scoremap
 
-        data_dict['scoremap_3d'] = create_multiple_gaussian_map_3d(data_dict['keypoint_xyz21_normed'], 32, 5)
+        data_dict['scoremap_3d'], data_dict['scaled_center'] = create_multiple_gaussian_map_3d(data_dict['keypoint_xyz21_normed'], 32, 5)
 
         if self.scale_to_size:
             image, keypoint_uv21, keypoint_vis21 = data_dict['image'], data_dict['keypoint_uv21'], data_dict['keypoint_vis21']

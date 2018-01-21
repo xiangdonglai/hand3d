@@ -29,6 +29,7 @@ import pdb
 from data.BinaryDbReader import *
 from data.BinaryDbReaderSTB import *
 from nets.E2ENet import E2ENet
+from nets.CPM import CPM
 from utils.general import EvalUtil, get_stb_ref_curves, calc_auc, plot_hand_3d, detect_keypoints, trafo_coords, plot_hand, detect_keypoints_3d, hand_size, load_weights_from_snapshot
 
 parser = argparse.ArgumentParser()
@@ -45,6 +46,7 @@ data = dataset.get()
 image_crop = data['image_crop']
 # build network
 net = E2ENet(32)
+# net = CPM()
 
 # feed through network
 scoremap_3d, scoremap = net.inference(image_crop)

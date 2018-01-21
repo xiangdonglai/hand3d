@@ -1,3 +1,4 @@
+# This code is written for Python 2.
 import os, sys
 sys.path.append('../utils/')
 import json

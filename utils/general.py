@@ -34,6 +34,11 @@ class NetworkOps(object):
         return out_tensor
 
     @classmethod
+    def relu(cls, tensor, name='relu_pure'):
+        out_tensor = tf.maximum(tensor, tf.constant(0.0, dtype=tf.float32), name=name)
+        return out_tensor
+
+    @classmethod
     def conv(cls, in_tensor, layer_name, kernel_size, stride, out_chan, trainable=True):
         with tf.variable_scope(layer_name):
             in_size = in_tensor.get_shape().as_list()
@@ -54,9 +59,12 @@ class NetworkOps(object):
             return out_tensor
 
     @classmethod
-    def conv_relu(cls, in_tensor, layer_name, kernel_size, stride, out_chan, trainable=True):
+    def conv_relu(cls, in_tensor, layer_name, kernel_size, stride, out_chan, leaky=True, trainable=True):
         tensor = cls.conv(in_tensor, layer_name, kernel_size, stride, out_chan, trainable)
-        out_tensor = cls.leaky_relu(tensor, name='out')
+        if leaky:
+            out_tensor = cls.leaky_relu(tensor, name='out')
+        else:
+            out_tensor = cls.relu(tensor, name='out')
         return out_tensor
 
     @classmethod

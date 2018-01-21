@@ -86,7 +86,7 @@ train_para = {'lr': [1e-4, 1e-5, 1e-6],
               'max_iter': 80000,
               'show_loss_freq': 100,
               'snapshot_freq': 5000,
-              'snapshot_dir': 'snapshots_lifting_%s_domeaug_slight' % VARIANT}
+              'snapshot_dir': 'snapshots_lifting_%s_dome_a4_resampled' % VARIANT}
 
 # get dataset
 # dataset = BinaryDbReader(mode='training',
@@ -98,15 +98,15 @@ train_para = {'lr': [1e-4, 1e-5, 1e-6],
 # dataset = DomeReader(mode='training',
 #                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
 #                          coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
-dataset = DomeAugReader(mode='training',
-                         batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
-                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=False)
-# dataset = DomeReader(mode='training',
+# dataset = DomeAugReader(mode='training',
 #                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
-#                          coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True)
+#                          coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=False)
+dataset = DomeReader(mode='training',
+                         batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
+                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False)
 
 # build network graph
-data = dataset.get(slight=True)
+data = dataset.get()
 
 # build network
 net = PosePriorNetwork(VARIANT)

@@ -96,16 +96,17 @@ class DomeReader(object):
                 self.camera_data[key] = value
 
         if a4:
-            self.path_to_db = './data/hand_data_a4.json'
+            self.path_to_db = './data/hand_data_a4_resampled.json'
             self.camera_file = './data/camera_data_a4.pkl'
             with open(self.path_to_db) as f:
                 json_data_a4 = json.load(f)
                 for data in json_data_a4['training_data']:
                     data['db_name'] = 'a4/hdImgs'
                 for data in json_data_a4['testing_data']:
-                    data['db_name'] = 'a2/imgs/'
+                    data['db_name'] = 'a4/hdImgs/'
+
             if mode == 'training':
-                t_data += json_data_a4['training_data']
+                t_data += json_data_a4['training_data']                
             else:
                 assert mode == 'evaluation'
                 t_data += json_data_a4['testing_data']
@@ -126,6 +127,8 @@ class DomeReader(object):
         hand_sides = []
         img_dirs = []
         for ihand, hand3d in enumerate(t_data):
+            if 'resampled' in hand3d and hand3d['resampled'] == 0:
+                continue
             joint3d = np.array(hand3d['hand3d']).reshape(-1, 3)
             for i in (1, 5, 9, 13, 17):
                 joint3d[i:i+4] = joint3d[i+3:i-1:-1] # reverse the order of fingers (from palm to tip)
@@ -150,6 +153,7 @@ class DomeReader(object):
         self.joints2d = tf.constant(joints2d) # 94221, 21, 2
         self.hand_sides = tf.constant(hand_sides) # 94221, 
         self.img_dirs = tf.constant(np.array(img_dirs))
+        print('loaded DomeDB with number of samples {}'.format(self.num_samples))
 
     def get(self, read_image=False):
 
@@ -171,6 +175,8 @@ class DomeReader(object):
         keypoint_vis21 = tf.ones([21,], tf.bool)
         data_dict['keypoint_vis21'] = keypoint_vis21
 
+        keypoint_xyz21 /= 100 # convert dome (centimeter) to meter
+
         kp_coord_xyz21 = keypoint_xyz21
         data_dict['keypoint_xyz21'] = keypoint_xyz21
         data_dict['keypoint_uv21'] = keypoint_uv21
@@ -179,7 +185,7 @@ class DomeReader(object):
         index_root_bone_length = tf.sqrt(tf.reduce_sum(tf.square(kp_coord_xyz21_rel[12, :] - kp_coord_xyz21_rel[11, :])))
         # data_dict['keypoint_scale'] = index_root_bone_length
         # data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / index_root_bone_length  # normalized by length of 12->11
-        data_dict['keypoint_scale'] = hand_size_tf(kp_coord_xyz21_rel)
+        data_dict['keypoint_scale'] = hand_size_tf(kp_coord_xyz21_rel) 
         data_dict['index_scale'] = index_root_bone_length
         data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / data_dict['keypoint_scale']
 
@@ -327,7 +333,7 @@ class DomeReader(object):
             return scoremap
 
 if __name__ == '__main__':
-    d = DomeReader(mode='evaluation',
+    d = DomeReader(mode='training',
                          batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False,
                          coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False)
     # data = d.get(read_image=True)
