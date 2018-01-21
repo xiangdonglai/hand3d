@@ -40,7 +40,8 @@ class CPM(object):
 
             conv5_3 = ops.conv_relu(x, 'conv5_3_CPM', kernel_size=3, stride=1, out_chan=128, leaky=False, trainable=train)
             x = ops.conv_relu(conv5_3, 'conv6_1_CPM', kernel_size=1, stride=1, out_chan=512, leaky=False, trainable=train)
-            x = ops.conv(x, 'conv6_2_CPM', kernel_size=1, stride=1, out_chan=22, trainable=train)
+            x = ops.conv(x, 'conv6_2_CPM', kernel_size=1, stride=1, out_chan=self.out_chan, trainable=train)
+            scoremaps = [x]
 
             for stage_id in range(2, 7):
                 x = tf.concat([x, conv5_3], axis=3, name='concat_stage{}'.format(stage_id))
@@ -48,5 +49,6 @@ class CPM(object):
                     x = ops.conv_relu(x, 'Mconv{}_stage{}'.format(layer_id, stage_id), kernel_size=7, stride=1, out_chan=128, leaky=False, trainable=train)
                 x = ops.conv_relu(x, 'Mconv6_stage{}'.format(stage_id), kernel_size=1, stride=1, out_chan=128, leaky=False, trainable=train)
                 x = ops.conv(x, 'Mconv7_stage{}'.format(stage_id), kernel_size=1, stride=1, out_chan=self.out_chan, trainable=train)
+                scoremaps.append(x)
 
-        return x
+        return scoremaps

@@ -192,3 +192,40 @@ else:
         calib_dict[seqName] = cam_dict
     with open('./camera_data_a4.pkl', 'wb') as f:
         cp.dump(calib_dict, f)
+
+"""
+#################################################################
+Manual DB
+#################################################################
+"""
+if os.path.isfile('./hand_json_manual.json'):
+    print('Hand file exists.')
+else:
+    root = '/media/posefs0c/Users/donglaix/hand_labels/hand_labels/manual_test/'
+    testing_data = []
+    file_list = os.listdir(root)
+    for filename in file_list:
+        if filename.endswith('jpg'):
+            continue
+        with open(os.path.join(root, filename)) as f:
+            data = json.load(f)
+        hand2d = np.array(data['hand_pts'])[:, :2].tolist()
+        basename = '.'.join(filename.split('.')[:-1])
+        hand_data = {'hand2d': hand2d, 'head_size': data['head_size'], 'lr': 1-data['is_left'], 'is_mpii': data['is_mpii'], 'filename': basename}
+        testing_data.append(hand_data)
+
+    root = '/media/posefs0c/Users/donglaix/hand_labels/hand_labels/manual_train/'
+    training_data = []
+    file_list = os.listdir(root)
+    for filename in file_list:
+        if filename.endswith('jpg'):
+            continue
+        with open(os.path.join(root, filename)) as f:
+            data = json.load(f)
+        hand2d = np.array(data['hand_pts'])[:, :2].tolist()
+        basename = filename.split('.')[0]
+        hand_data = {'hand2d': hand2d, 'head_size': data['head_size'], 'lr': 1-data['is_left'], 'is_mpii': data['is_mpii'], 'filename': basename}
+        training_data.append(hand_data)
+
+    with open('./hand_json_manual.json', 'w') as f:
+        json.dump({'training_data': training_data, 'testing_data': testing_data}, f)

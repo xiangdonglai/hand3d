@@ -10,3 +10,4 @@ weights/
 snapshots_*
 *.json
 *.png
+*.backup

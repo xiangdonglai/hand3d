@@ -44,7 +44,7 @@ data = dataset.get(read_image=True)
 # build network
 evaluation = tf.placeholder_with_default(True, shape=())
 net = CPM()
-predicted_scoremap = net.inference(data['image_crop'], train=True)
+predicted_scoremaps = net.inference(data['image_crop'], train=True)
 
 # Start TF
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
@@ -53,9 +53,12 @@ sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
 # Loss
-resize = predicted_scoremap.get_shape().as_list()
-resized_scoremap = tf.image.resize_images(data['scoremap'], (resize[1], resize[2]))
-loss = tf.reduce_mean(tf.square(predicted_scoremap - resized_scoremap))
+loss = 0.0
+for predicted_scoremap in predicted_scoremaps:
+    resize = predicted_scoremap.get_shape().as_list()
+    resized_scoremap = tf.image.resize_images(data['scoremap'], (resize[1], resize[2]))
+    loss += tf.reduce_mean(tf.square(predicted_scoremap - resized_scoremap))
+loss /= len(predicted_scoremaps)
 tf.summary.scalar('loss', loss)
 
 # Solver

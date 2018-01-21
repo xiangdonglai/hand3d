@@ -24,25 +24,36 @@
 from __future__ import print_function, unicode_literals
 import tensorflow as tf
 import numpy as np
+import argparse
 
 from data.BinaryDbReader import *
+from data.DomeReader import DomeReader
 from nets.ColorHandPose3DNetwork import ColorHandPose3DNetwork
-from utils.general import detect_keypoints, EvalUtil, load_weights_from_snapshot
+from nets.CPM import CPM
+from utils.general import detect_keypoints, EvalUtil, load_weights_from_snapshot, plot_hand
+import matplotlib.pyplot as plt
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--visualize', '-v', action='store_true')
+args = parser.parse_args()
 
 # flag that allows to load a retrained snapshot(original weights used in the paper are used otherwise)
-USE_RETRAINED = False
-PATH_TO_SNAPSHOTS = './snapshots_posenet/'  # only used when USE_RETRAINED is true
+USE_RETRAINED = True
+PATH_TO_SNAPSHOTS = './snapshots_CPM/'  # only used when USE_RETRAINED is true
 
 # get dataset
-dataset = BinaryDbReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False)
+# dataset = BinaryDbReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False)
+dataset = DomeReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, a2=False, a4=True)
 
 # build network graph
-data = dataset.get()
+data = dataset.get(read_image=True)
 
 # build network
 evaluation = tf.placeholder_with_default(True, shape=())
-net = ColorHandPose3DNetwork()
-keypoints_scoremap = net.inference_pose2d(data['image_crop'])
+# net = ColorHandPose3DNetwork()
+net = CPM()
+# keypoints_scoremap = net.inference_pose2d(data['image_crop'])
+keypoints_scoremap = net.inference(data['image_crop'])
 keypoints_scoremap = keypoints_scoremap[-1]
 
 # upscale to original size
@@ -50,8 +61,9 @@ s = data['image_crop'].get_shape().as_list()
 keypoints_scoremap = tf.image.resize_images(keypoints_scoremap, (s[1], s[2]))
 
 # Start TF
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
 sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
 # initialize network weights
@@ -68,7 +80,7 @@ util = EvalUtil()
 # iterate dataset
 for i in range(dataset.num_samples):
     # get prediction
-    crop_scale, keypoints_scoremap_v, kp_uv21_gt, kp_vis = sess.run([data['crop_scale'], keypoints_scoremap, data['keypoint_uv21'], data['keypoint_vis21']])
+    crop_scale, keypoints_scoremap_v, kp_uv21_gt, kp_vis, image_crop = sess.run([data['crop_scale'], keypoints_scoremap, data['keypoint_uv21'], data['keypoint_vis21'], data['image_crop']])
 
     keypoints_scoremap_v = np.squeeze(keypoints_scoremap_v)
     kp_uv21_gt = np.squeeze(kp_uv21_gt)
@@ -79,10 +91,17 @@ for i in range(dataset.num_samples):
     coord_hw_pred_crop = detect_keypoints(np.squeeze(keypoints_scoremap_v))
     coord_uv_pred_crop = np.stack([coord_hw_pred_crop[:, 1], coord_hw_pred_crop[:, 0]], 1)
 
+    image_crop = np.squeeze((image_crop+0.5)*255).astype(np.uint8)
+
     util.feed(kp_uv21_gt/crop_scale, kp_vis, coord_uv_pred_crop/crop_scale)
 
     if (i % 100) == 0:
         print('%d / %d images done: %.3f percent' % (i, dataset.num_samples, i*100.0/dataset.num_samples))
+
+        if args.visualize:
+            plt.imshow(image_crop)
+            plot_hand(coord_hw_pred_crop, plt)
+            plt.show()
 
 mean, median, auc, _, _ = util.get_measures(0.0, 30.0, 20)
 print('Evaluation results:')
