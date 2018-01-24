@@ -22,47 +22,50 @@ import os
 import sys
 
 from nets.CPM import CPM
-from data.DomeReader import DomeReader
+from data.TsimonDBReader import TsimonDBReader
 from utils.general import LearningRateScheduler, load_weights_from_snapshot
 
 # training parameters
-train_para = {'lr': [1e-4, 1e-5, 1e-6],
-              'lr_iter': [10000, 20000],
-              'max_iter': 30000,
+train_para = {'lr': [1e-5, 1e-6, 1e-7],
+              'lr_iter': [20000, 40000],
+              'max_iter': 100000,
               'show_loss_freq': 100,
               'snapshot_freq': 5000,
               'snapshot_dir': 'snapshots_cpm'}
 
 # get dataset
-dataset = DomeReader(mode='training',
-                         batch_size=8, shuffle=True, use_wrist_coord=False,
-                         hand_crop=True, coord_uv_noise=True, crop_center_noise=True, a4=True, a2=False)
+dataset = TsimonDBReader(mode='training',
+                         batch_size=8, shuffle=True, use_wrist_coord=False, crop_size=368, sigma=25.0,
+                         hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True)
 
 # build network graph
-data = dataset.get(read_image=True)
+data = dataset.get(read_image=True, extra=True)
 
 # build network
 evaluation = tf.placeholder_with_default(True, shape=())
-net = CPM()
+net = CPM(crop_size=368, out_chan=22)
 predicted_scoremaps = net.inference(data['image_crop'], train=True)
 
 # Start TF
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.6)
 sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
 # Loss
+losses = []
 loss = 0.0
-for predicted_scoremap in predicted_scoremaps:
-    resize = predicted_scoremap.get_shape().as_list()
-    resized_scoremap = tf.image.resize_images(data['scoremap'], (resize[1], resize[2]))
-    loss += tf.reduce_mean(tf.square(predicted_scoremap - resized_scoremap))
+for ip, predicted_scoremap in enumerate(predicted_scoremaps):
+    resize = data['scoremap'].get_shape().as_list()
+    resized_scoremap = tf.image.resize_images(predicted_scoremap, (resize[1], resize[2]))
+    losses.append(tf.reduce_mean(tf.square(data['scoremap'] - resized_scoremap)))
+    loss += losses[ip]
+    tf.summary.scalar('loss_{}'.format(ip), losses[ip])
 loss /= len(predicted_scoremaps)
 tf.summary.scalar('loss', loss)
 
 # Solver
-global_step = tf.Variable(0, trainable=False, name="global_step")
+global_step = tf.Variable(50000, trainable=False, name="global_step")
 lr_scheduler = LearningRateScheduler(values=train_para['lr'], steps=train_para['lr_iter'])
 lr = lr_scheduler.get_lr(global_step)
 opt = tf.train.AdamOptimizer(lr)
@@ -81,9 +84,12 @@ merged = tf.summary.merge_all()
 train_writer = tf.summary.FileWriter(train_para['snapshot_dir'] + '/train',
                                       sess.graph)
 
+PATH_TO_SNAPSHOTS = './snapshots_cpm/model-50000'  # only used when USE_RETRAINED is true
+saver.restore(sess, PATH_TO_SNAPSHOTS)
+
 # Training loop
 print('Starting to train ...')
-for i in range(train_para['max_iter']):
+for i in range(50000, train_para['max_iter']):
     summary, _, loss_v = sess.run([merged, train_op, loss])
     train_writer.add_summary(summary, i)
 

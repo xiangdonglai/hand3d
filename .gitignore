@@ -11,3 +11,4 @@ snapshots_*
 *.json
 *.png
 *.backup
+eval/hand_mpi_nzl_v20_orig_ts/
