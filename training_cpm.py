@@ -26,12 +26,12 @@ from data.TsimonDBReader import TsimonDBReader
 from utils.general import LearningRateScheduler, load_weights_from_snapshot
 
 # training parameters
-train_para = {'lr': [1e-5, 1e-6, 1e-7],
+train_para = {'lr': [1e-4, 1e-5, 1e-6],
               'lr_iter': [20000, 40000],
               'max_iter': 100000,
               'show_loss_freq': 100,
               'snapshot_freq': 5000,
-              'snapshot_dir': 'snapshots_cpm'}
+              'snapshot_dir': 'snapshots_cpm_vis'}
 
 # get dataset
 dataset = TsimonDBReader(mode='training',
@@ -53,19 +53,21 @@ sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
 # Loss
+s = data['scoremap'].get_shape().as_list()
+ext_vis = tf.concat([data['keypoint_vis21'], tf.ones([s[0], 1], dtype=tf.bool)], axis=1)
+vis = tf.cast(tf.reshape(ext_vis, [s[0], s[3]]), tf.float32)
 losses = []
 loss = 0.0
 for ip, predicted_scoremap in enumerate(predicted_scoremaps):
-    resize = data['scoremap'].get_shape().as_list()
-    resized_scoremap = tf.image.resize_images(predicted_scoremap, (resize[1], resize[2]))
-    losses.append(tf.reduce_mean(tf.square(data['scoremap'] - resized_scoremap)))
+    resized_scoremap = tf.image.resize_images(predicted_scoremap, (s[1], s[2]))
+    losses.append(tf.reduce_sum(vis * tf.reduce_mean(tf.square(resized_scoremap - data['scoremap']), [1, 2])) / (tf.reduce_sum(vis) + 0.001))
     loss += losses[ip]
     tf.summary.scalar('loss_{}'.format(ip), losses[ip])
 loss /= len(predicted_scoremaps)
 tf.summary.scalar('loss', loss)
 
 # Solver
-global_step = tf.Variable(50000, trainable=False, name="global_step")
+global_step = tf.Variable(0, trainable=False, name="global_step")
 lr_scheduler = LearningRateScheduler(values=train_para['lr'], steps=train_para['lr_iter'])
 lr = lr_scheduler.get_lr(global_step)
 opt = tf.train.AdamOptimizer(lr)
@@ -84,12 +86,12 @@ merged = tf.summary.merge_all()
 train_writer = tf.summary.FileWriter(train_para['snapshot_dir'] + '/train',
                                       sess.graph)
 
-PATH_TO_SNAPSHOTS = './snapshots_cpm/model-50000'  # only used when USE_RETRAINED is true
-saver.restore(sess, PATH_TO_SNAPSHOTS)
+# PATH_TO_SNAPSHOTS = './snapshots_cpm/model-50000'  # only used when USE_RETRAINED is true
+# saver.restore(sess, PATH_TO_SNAPSHOTS)
 
 # Training loop
 print('Starting to train ...')
-for i in range(50000, train_para['max_iter']):
+for i in range(0, train_para['max_iter']):
     summary, _, loss_v = sess.run([merged, train_op, loss])
     train_writer.add_summary(summary, i)
 

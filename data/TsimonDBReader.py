@@ -9,7 +9,7 @@ import os
 
 class TsimonDBReader(object):
 
-    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False,
+    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, random_hue=False,
         coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False, crop_size=256, sigma=25.0):
 
         self.batch_size = batch_size
@@ -25,6 +25,7 @@ class TsimonDBReader(object):
         self.crop_offset_noise = crop_offset_noise
         self.crop_offset_noise_sigma = 10.0  # translates the crop after size calculation (this can move keypoints outside)
         self.crop_scale_noise = crop_scale_noise
+        self.random_hue = random_hue
 
         self.image_size = (1080, 1920)
         self.crop_size = crop_size
@@ -38,15 +39,17 @@ class TsimonDBReader(object):
         joints2d = []
         hand_sides = []
         img_dirs = []
+        vis = []
 
         for filename in self.path_to_db:
             with open(filename) as f:
                 filedata = json.load(f)
             for ihand, hand_data in enumerate(filedata['root']):
-                joint2d = np.array(hand_data['joint_self'])[:, :2]
+                joint2d = np.array(hand_data['joint_self'])
                 for i in (1, 5, 9, 13, 17):
                     joint2d[i:i+4] = joint2d[i+3:i-1:-1] # reverse the order of fingers (from palm to tip)
-                joints2d.append(joint2d)
+                joints2d.append(joint2d[:, :2])
+                vis.append(joint2d[:, 2])
                 hand_sides.append(1) # all are right hands
                 img_dir = '{}/{}'.format(self.image_root, '/'.join(hand_data['img_paths'].split('/')[5:]))
                 img_dirs.append(img_dir)
@@ -56,19 +59,26 @@ class TsimonDBReader(object):
         joints2d = np.array(joints2d, dtype=np.float32)
         hand_sides = np.array(hand_sides, dtype=bool)
         img_dirs = np.array(img_dirs)
+        vis = np.array(vis, dtype=bool)
 
         self.joints2d = tf.constant(joints2d) # 94221, 21, 2
         self.hand_sides = tf.constant(hand_sides) # 94221, 
         self.img_dirs = tf.constant(img_dirs)
+        self.vis = tf.constant(vis)
         print('loaded TsimonDB with number of samples {}'.format(self.num_samples))
 
     def get(self, read_image=False, extra=False):
 
-        [joint2d, hand_side, img_dir] = tf.train.slice_input_producer([self.joints2d, self.hand_sides, self.img_dirs], shuffle=self.shuffle)
+        [joint2d, hand_side, img_dir, vis] = tf.train.slice_input_producer([self.joints2d, self.hand_sides, self.img_dirs, self.vis], shuffle=self.shuffle)
         keypoint_uv21 = joint2d
+        keypoint_vis21 = vis
+
         if not self.use_wrist_coord:
             palm_coord_uv = tf.expand_dims(0.5*(keypoint_uv21[0, :] + keypoint_uv21[12, :]), 0)
             keypoint_uv21 = tf.concat([palm_coord_uv, keypoint_uv21[1:21, :]], 0)
+            palm_vis = tf.expand_dims(tf.logical_or(keypoint_vis21[0], keypoint_vis21[12]), 0)
+            keypoint_vis21 = tf.concat([palm_vis, keypoint_vis21[1:21]], 0)
+
         if self.coord_uv_noise:
             noise = tf.truncated_normal([21, 2], mean=0.0, stddev=self.coord_uv_noise_sigma)
             keypoint_uv21 += noise
@@ -77,7 +87,6 @@ class TsimonDBReader(object):
         data_dict['img_dir'] = img_dir
         data_dict['hand_side'] = tf.one_hot(tf.cast(hand_side, tf.uint8), depth=2, on_value=1.0, off_value=0.0, dtype=tf.float32)
 
-        keypoint_vis21 = tf.ones([21,], tf.bool)
         data_dict['keypoint_vis21'] = keypoint_vis21
         data_dict['keypoint_uv21_origin'] = data_dict['keypoint_uv21'] = keypoint_uv21
 
@@ -91,7 +100,11 @@ class TsimonDBReader(object):
                 noise = tf.truncated_normal([2], mean=0.0, stddev=self.crop_center_noise_sigma)
                 crop_center += noise
 
-            kp_coord_hw = tf.stack([keypoint_uv21[:, 1], keypoint_uv21[:, 0]], 1)
+            # select visible coords only
+            kp_coord_h = tf.boolean_mask(keypoint_uv21[:, 1], keypoint_vis21)
+            kp_coord_w = tf.boolean_mask(keypoint_uv21[:, 0], keypoint_vis21)
+            kp_coord_hw = tf.stack([kp_coord_h, kp_coord_w], 1)
+
             # determine size of crop (measure spatial extend of hw coords first)
             # min_coord = tf.maximum(tf.reduce_min(kp_coord_hw, 0), 0.0)
             # max_coord = tf.minimum(tf.reduce_max(kp_coord_hw, 0), self.image_size)
@@ -110,7 +123,7 @@ class TsimonDBReader(object):
 
             crop_scale_noise = tf.constant(1.0)
             if self.crop_scale_noise:
-                crop_scale_noise = tf.squeeze(tf.random_uniform([1], minval=0.7, maxval=1.5))    
+                crop_scale_noise = tf.squeeze(tf.random_uniform([1], minval=0.7, maxval=1.3))    
             crop_size_best *= crop_scale_noise
 
             # calculate necessary scaling
@@ -140,6 +153,9 @@ class TsimonDBReader(object):
             img_crop = tf.squeeze(img_crop)
             # return left hand only: flip the cropped image if hand_side is True.
             img_crop = tf.cond(hand_side, lambda: img_crop[:, ::-1, :], lambda: img_crop)            
+
+            if self.random_hue:
+                img_crop = tf.image.random_hue(img_crop, 0.1)
             data_dict['image_crop'] = img_crop
 
         keypoint_hw21 = tf.stack([keypoint_uv21[:, 1], keypoint_uv21[:, 0]], -1)
@@ -228,7 +244,7 @@ class TsimonDBReader(object):
 
 if __name__ == '__main__':
     d = TsimonDBReader(mode='training',
-                         batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size=368,
+                         batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size=368, random_hue=True,
                          crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
     data = d.get(read_image=True)
     resized_ = tf.image.resize_images(data['scoremap'], [48, 48])
@@ -242,14 +258,19 @@ if __name__ == '__main__':
     # from mpl_toolkits.mplot3d import Axes3D
 
     for i in range(50):
-        scoremap, keypoint_uv21, image_crop, resized = sess.run([data['scoremap'], data['keypoint_uv21'], data['image_crop'], resized_])
+        scoremap, keypoint_uv21, image_crop, resized, img_dir, keypoint_vis21 \
+            = sess.run([data['scoremap'], data['keypoint_uv21'], data['image_crop'], resized_, data['img_dir'], data['keypoint_vis21']])
         scoremap = np.squeeze(scoremap)
         resized = np.squeeze(resized)
         image_crop = np.squeeze((image_crop+0.5) * 255).astype(np.uint8)
         keypoint_uv21 = np.squeeze(keypoint_uv21)
+        keypoint_vis21 = np.squeeze(keypoint_vis21)
 
         keypoints = detect_keypoints(scoremap)
         resized_keypoints = detect_keypoints(resized)
+        print(img_dir[0].decode())
+        # print(keypoint_vis21)
+        # print(keypoint_uv21)
 
         fig = plt.figure()
         ax = fig.add_subplot(121)

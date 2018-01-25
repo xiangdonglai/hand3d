@@ -77,6 +77,7 @@ if USE_RETRAINED:
     last_cpt = tf.train.latest_checkpoint(PATH_TO_SNAPSHOTS)
     assert last_cpt is not None, "Could not locate snapshot to load. Did you already train the network and set the path accordingly?"
     load_weights_from_snapshot(sess, last_cpt, discard_list=['Adam', 'global_step', 'beta'])
+    print('loading weights from {}'.format(last_cpt))
 else:
     # load weights used in the paper
     net.init(sess, weight_files=['./weights/posenet-rhd-stb.pickle'], exclude_var_list=['PosePrior', 'ViewpointNet'])
