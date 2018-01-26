@@ -335,7 +335,7 @@ class DomeReader(object):
 if __name__ == '__main__':
     d = DomeReader(mode='training',
                          batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False,
-                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False)
+                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=False, a2=True)
     # data = d.get(read_image=True)
     # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
     # sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))

@@ -31,11 +31,11 @@ train_para = {'lr': [1e-4, 1e-5, 1e-6],
               'max_iter': 100000,
               'show_loss_freq': 100,
               'snapshot_freq': 5000,
-              'snapshot_dir': 'snapshots_cpm_vis'}
+              'snapshot_dir': 'snapshots_cpm_rotate_s10'}
 
 # get dataset
 dataset = TsimonDBReader(mode='training',
-                         batch_size=8, shuffle=True, use_wrist_coord=False, crop_size=368, sigma=25.0,
+                         batch_size=8, shuffle=True, use_wrist_coord=False, crop_size=368, sigma=10.0, random_rotate=True, random_hue=False,
                          hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True)
 
 # build network graph
@@ -86,7 +86,7 @@ merged = tf.summary.merge_all()
 train_writer = tf.summary.FileWriter(train_para['snapshot_dir'] + '/train',
                                       sess.graph)
 
-# PATH_TO_SNAPSHOTS = './snapshots_cpm/model-50000'  # only used when USE_RETRAINED is true
+# PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_hue/model-40000'  # only used when USE_RETRAINED is true
 # saver.restore(sess, PATH_TO_SNAPSHOTS)
 
 # Training loop

@@ -122,7 +122,7 @@ class ManualDBReader(object):
             crop_size_best = tf.cond(tf.reduce_all(tf.is_finite(crop_size_best)), lambda: crop_size_best,
                                   lambda: tf.constant(200.0))
             crop_size_best.set_shape([])
-            crop_size_best *= 2.0
+            crop_size_best *= 2
             crop_size_best *= crop_scale_noise
 
             # calculate necessary scaling

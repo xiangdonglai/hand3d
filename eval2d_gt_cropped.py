@@ -27,6 +27,7 @@ import numpy as np
 import argparse
 
 from data.BinaryDbReader import *
+from data.BinaryDbReaderSTB import *
 from data.DomeReader import DomeReader
 from data.ManualDBReader import ManualDBReader
 from data.TsimonDBReader import TsimonDBReader
@@ -42,16 +43,18 @@ args = parser.parse_args()
 
 # flag that allows to load a retrained snapshot(original weights used in the paper are used otherwise)
 USE_RETRAINED = True
-PATH_TO_SNAPSHOTS = './snapshots_cpm_s40_hs2/'  # only used when USE_RETRAINED is true
+PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_hue/'  # only used when USE_RETRAINED is true
 
 # get dataset
 # dataset = BinaryDbReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False)
 # dataset = DomeReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, a2=False, a4=True)
+# dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, crop_size=368)
 dataset = ManualDBReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, crop_size=368)
 # dataset = TsimonDBReader(mode='training', shuffle=False, hand_crop=True, use_wrist_coord=False, crop_size=368)
 
 # build network graph
 data = dataset.get(read_image=True)
+# data = dataset.get()
 
 # build network
 evaluation = tf.placeholder_with_default(True, shape=())
@@ -90,6 +93,8 @@ for i in range(dataset.num_samples):
     # get prediction
     crop_scale, keypoints_scoremap_v, kp_uv21_gt, kp_vis, image_crop, crop_center, img_dir, hand_side, head_size \
         = sess.run([data['crop_scale'], keypoints_scoremap, data['keypoint_uv21'], data['keypoint_vis21'], data['image_crop'], data['crop_center'], data['img_dir'], data['hand_side'], data['head_size']])
+    # crop_scale, keypoints_scoremap_v, kp_uv21_gt, kp_vis, img_dir, hand_side, image_crop \
+    #     = sess.run([data['crop_scale'], keypoints_scoremap, data['keypoint_uv21'], data['keypoint_vis21'], data['image_crop'], data['hand_side'], data['image_crop']])
 
     keypoints_scoremap_v = np.squeeze(keypoints_scoremap_v)
     kp_uv21_gt = np.squeeze(kp_uv21_gt)

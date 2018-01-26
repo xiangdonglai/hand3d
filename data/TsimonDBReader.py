@@ -9,7 +9,7 @@ import os
 
 class TsimonDBReader(object):
 
-    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, random_hue=False,
+    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, random_hue=False, random_rotate=False,
         coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False, crop_size=256, sigma=25.0):
 
         self.batch_size = batch_size
@@ -26,6 +26,7 @@ class TsimonDBReader(object):
         self.crop_offset_noise_sigma = 10.0  # translates the crop after size calculation (this can move keypoints outside)
         self.crop_scale_noise = crop_scale_noise
         self.random_hue = random_hue
+        self.random_rotate = random_rotate
 
         self.image_size = (1080, 1920)
         self.crop_size = crop_size
@@ -119,11 +120,11 @@ class TsimonDBReader(object):
                                   lambda: tf.constant(200.0))
             crop_size_best.set_shape([])
             data_dict['head_size'] = crop_size_best
-            crop_size_best *= 2
+            crop_size_best *= 2.0
 
             crop_scale_noise = tf.constant(1.0)
             if self.crop_scale_noise:
-                crop_scale_noise = tf.squeeze(tf.random_uniform([1], minval=0.7, maxval=1.3))    
+                crop_scale_noise = tf.squeeze(tf.random_uniform([1], minval=0.8, maxval=1.2)) 
             crop_size_best *= crop_scale_noise
 
             # calculate necessary scaling
@@ -140,6 +141,12 @@ class TsimonDBReader(object):
                 lambda: (keypoint_uv21[:, 0] - crop_center_float[1]) * scale + self.crop_size // 2)
             keypoint_uv21_v = (keypoint_uv21[:, 1] - crop_center_float[0]) * scale + self.crop_size // 2
             keypoint_uv21 = tf.stack([keypoint_uv21_u, keypoint_uv21_v], 1)
+
+            if self.random_rotate:
+                angle = tf.random_uniform([], minval=-np.pi*80/180, maxval=np.pi*80/180)
+                rotate_matrix = tf.dynamic_stitch([[0], [1], [2], [3]], [[tf.cos(angle)], [-tf.sin(angle)], [tf.sin(angle)], [tf.cos(angle)]])
+                rotate_matrix = tf.reshape(rotate_matrix, [2, 2])
+                keypoint_uv21 = tf.matmul(keypoint_uv21 - self.crop_size//2, rotate_matrix) + self.crop_size//2
             data_dict['keypoint_uv21'] = keypoint_uv21            
 
         if read_image:
@@ -149,10 +156,12 @@ class TsimonDBReader(object):
             image.set_shape((1080, 1920, 3))
             image = tf.cast(image, tf.float32)
             img_crop = crop_image_from_xy(tf.expand_dims(image, 0), crop_center, self.crop_size, scale)
-            img_crop = img_crop / 255.0 - 0.5
             img_crop = tf.squeeze(img_crop)
             # return left hand only: flip the cropped image if hand_side is True.
-            img_crop = tf.cond(hand_side, lambda: img_crop[:, ::-1, :], lambda: img_crop)            
+            img_crop = tf.cond(hand_side, lambda: img_crop[:, ::-1, :], lambda: img_crop)
+            if self.random_rotate:
+                img_crop = tf.contrib.image.rotate(img_crop, angle)
+            img_crop = img_crop / 255.0 - 0.5
 
             if self.random_hue:
                 img_crop = tf.image.random_hue(img_crop, 0.1)
@@ -244,7 +253,7 @@ class TsimonDBReader(object):
 
 if __name__ == '__main__':
     d = TsimonDBReader(mode='training',
-                         batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size=368, random_hue=True,
+                         batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=True, crop_size=368, random_hue=False, random_rotate=True,
                          crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
     data = d.get(read_image=True)
     resized_ = tf.image.resize_images(data['scoremap'], [48, 48])
@@ -277,5 +286,6 @@ if __name__ == '__main__':
         plot_hand(keypoints, ax)
         plt.imshow(image_crop)
         ax = fig.add_subplot(122)
-        plot_hand(resized_keypoints, ax)
+        plot_hand(keypoint_uv21[:, ::-1], ax)
+        plt.imshow(image_crop)
         plt.show()

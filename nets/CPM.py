@@ -21,6 +21,24 @@ class CPM(object):
                         sess.run(var.assign(data))
         print('Finish loading weight from {}'.format(weight_path))
 
+    def init_vgg(self, sess, weight_path='./weights/vgg16.npy'):
+        with tf.variable_scope("CPM"):
+            data_dict = np.load(weight_path, encoding='latin1').item()
+            for op_name in data_dict:
+                if not op_name.startswith("conv") or op_name == 'conv5_3':
+                    continue
+                with tf.variable_scope(op_name, reuse=True):
+                    assert len(data_dict[op_name]) == 2
+                    for data in data_dict[op_name]:
+                        if data.ndim == 4:
+                            var = tf.get_variable('weights')
+                        elif data.ndim == 1:
+                            var = tf.get_variable('biases')
+                        else:
+                            raise Exception
+                        sess.run(var.assign(data))
+        print('Finish loading weight from {}'.format(weight_path))
+
     def inference(self, input_image, train=False):
         with tf.variable_scope("CPM"):
             s = input_image.get_shape().as_list()
