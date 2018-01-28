@@ -43,13 +43,13 @@ args = parser.parse_args()
 
 # flag that allows to load a retrained snapshot(original weights used in the paper are used otherwise)
 USE_RETRAINED = True
-PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_hue/'  # only used when USE_RETRAINED is true
+PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_wrist_vgg/'  # only used when USE_RETRAINED is true
 
 # get dataset
 # dataset = BinaryDbReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False)
 # dataset = DomeReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, a2=False, a4=True)
 # dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, crop_size=368)
-dataset = ManualDBReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, crop_size=368)
+dataset = ManualDBReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=True, crop_size=368)
 # dataset = TsimonDBReader(mode='training', shuffle=False, hand_crop=True, use_wrist_coord=False, crop_size=368)
 
 # build network graph
@@ -69,7 +69,7 @@ s = data['image_crop'].get_shape().as_list()
 keypoints_scoremap = tf.image.resize_images(keypoints_scoremap, (s[1], s[2]))
 
 # Start TF
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.2)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
 sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
@@ -111,9 +111,9 @@ for i in range(dataset.num_samples):
 
     image_crop = np.squeeze((image_crop+0.5)*255).astype(np.uint8)
 
-    kp_uv21_gt[0, :] = 2 * kp_uv21_gt[0, :] - kp_uv21_gt[12, :]
-    coord_uv_pred_crop[0, :] = 2 * coord_uv_pred_crop[0, :] - coord_uv_pred_crop[12, :]
-    coord_hw_pred_crop[0, :] = 2 * coord_hw_pred_crop[0, :] - coord_hw_pred_crop[12, :]
+    # kp_uv21_gt[0, :] = 2 * kp_uv21_gt[0, :] - kp_uv21_gt[12, :]
+    # coord_uv_pred_crop[0, :] = 2 * coord_uv_pred_crop[0, :] - coord_uv_pred_crop[12, :]
+    # coord_hw_pred_crop[0, :] = 2 * coord_hw_pred_crop[0, :] - coord_hw_pred_crop[12, :]
     util.feed(kp_uv21_gt/crop_scale/(head_size*0.7), kp_vis, coord_uv_pred_crop/crop_scale/(head_size*0.7))
 
     if (i % 100) == 0:

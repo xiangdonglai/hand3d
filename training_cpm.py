@@ -24,86 +24,140 @@ import sys
 from nets.CPM import CPM
 from data.TsimonDBReader import TsimonDBReader
 from utils.general import LearningRateScheduler, load_weights_from_snapshot
+from tensorflow.python.client import device_lib
 
+def average_gradients(tower_grads):
+
+    average_grads = []
+    for grad_and_vars in zip(*tower_grads):
+    # Note that each grad_and_vars looks like the following:
+    #   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
+        grads = []
+        for g, _ in grad_and_vars:
+            # Add 0 dimension to the gradients to represent the tower.
+            expanded_g = tf.expand_dims(g, 0)
+
+            # Append on a 'tower' dimension which we will average over below.
+            grads.append(expanded_g)
+
+        # Average over the 'tower' dimension.
+        grad = tf.concat(axis=0, values=grads)
+        grad = tf.reduce_mean(grad, 0)
+
+        # Keep in mind that the Variables are redundant because they are shared
+        # across towers. So .. we will just return the first tower's pointer to
+        # the Variable.
+        v = grad_and_vars[0][1]
+        grad_and_var = (grad, v)
+        average_grads.append(grad_and_var)
+    return average_grads
+
+num_gpu = sum([_.device_type == 'GPU' for _ in device_lib.list_local_devices()])
+fine_tune = True
+already_trained = 19992
+PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_vgg/model-{}'.format(already_trained)  # only used when USE_RETRAINED is true
 # training parameters
 train_para = {'lr': [1e-4, 1e-5, 1e-6],
-              'lr_iter': [20000, 40000],
-              'max_iter': 100000,
+              'lr_iter': [int(160000/num_gpu), int(20000/num_gpu)],
+              'max_iter': int(200000/num_gpu),
               'show_loss_freq': 100,
-              'snapshot_freq': 5000,
-              'snapshot_dir': 'snapshots_cpm_rotate_s10'}
+              'snapshot_freq': int(5000/num_gpu),
+              'snapshot_dir': 'snapshots_cpm_rotate_rotate_vgg'}
 
-# get dataset
-dataset = TsimonDBReader(mode='training',
-                         batch_size=8, shuffle=True, use_wrist_coord=False, crop_size=368, sigma=10.0, random_rotate=True, random_hue=False,
-                         hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True)
+with tf.Graph().as_default(), tf.device('/cpu:0'):
+    # get dataset
+    dataset = TsimonDBReader(mode='training',
+                             batch_size=8*num_gpu, shuffle=True, use_wrist_coord=False, crop_size=368, sigma=25.0, random_rotate=True, random_hue=False,
+                             hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True)
 
-# build network graph
-data = dataset.get(read_image=True, extra=True)
+    # build network graph
+    data = dataset.get(read_image=True, extra=True)
+    for k, v in data.items():
+        data[k] = tf.split(v, num_gpu, 0)
 
-# build network
-evaluation = tf.placeholder_with_default(True, shape=())
-net = CPM(crop_size=368, out_chan=22)
-predicted_scoremaps = net.inference(data['image_crop'], train=True)
+    tower_grads  = []
+    tower_losses = []
 
-# Start TF
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.6)
-sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
-sess.run(tf.global_variables_initializer())
-tf.train.start_queue_runners(sess=sess)
+    # Solver
+    if fine_tune:
+        global_step = tf.Variable(already_trained+1, trainable=False, name="global_step")
+    else:
+        global_step = tf.Variable(0, trainable=False, name="global_step")
+    lr_scheduler = LearningRateScheduler(values=train_para['lr'], steps=train_para['lr_iter'])
+    lr = lr_scheduler.get_lr(global_step)
+    opt = tf.train.AdamOptimizer(lr)
 
-# Loss
-s = data['scoremap'].get_shape().as_list()
-ext_vis = tf.concat([data['keypoint_vis21'], tf.ones([s[0], 1], dtype=tf.bool)], axis=1)
-vis = tf.cast(tf.reshape(ext_vis, [s[0], s[3]]), tf.float32)
-losses = []
-loss = 0.0
-for ip, predicted_scoremap in enumerate(predicted_scoremaps):
-    resized_scoremap = tf.image.resize_images(predicted_scoremap, (s[1], s[2]))
-    losses.append(tf.reduce_sum(vis * tf.reduce_mean(tf.square(resized_scoremap - data['scoremap']), [1, 2])) / (tf.reduce_sum(vis) + 0.001))
-    loss += losses[ip]
-    tf.summary.scalar('loss_{}'.format(ip), losses[ip])
-loss /= len(predicted_scoremaps)
-tf.summary.scalar('loss', loss)
+    with tf.variable_scope(tf.get_variable_scope()):
+        for ig in range(num_gpu):
+            with tf.device('/gpu:%d' % ig):
 
-# Solver
-global_step = tf.Variable(0, trainable=False, name="global_step")
-lr_scheduler = LearningRateScheduler(values=train_para['lr'], steps=train_para['lr_iter'])
-lr = lr_scheduler.get_lr(global_step)
-opt = tf.train.AdamOptimizer(lr)
-train_op = opt.minimize(loss)
+                # build network
+                net = CPM(crop_size=368, out_chan=22)
+                predicted_scoremaps = net.inference(data['image_crop'][ig], train=True)
 
-# init weights
-sess.run(tf.global_variables_initializer())
-saver = tf.train.Saver()
+                # Loss
+                s = data['scoremap'][ig].get_shape().as_list()
+                ext_vis = tf.concat([data['keypoint_vis21'][ig], tf.ones([s[0], 1], dtype=tf.bool)], axis=1)
+                vis = tf.cast(tf.reshape(ext_vis, [s[0], s[3]]), tf.float32)
+                losses = []
+                loss = 0.0
+                for ip, predicted_scoremap in enumerate(predicted_scoremaps):
+                    resized_scoremap = tf.image.resize_images(predicted_scoremap, (s[1], s[2]))
+                    losses.append(tf.reduce_sum(vis * tf.reduce_mean(tf.square(resized_scoremap - data['scoremap'][ig]), [1, 2])) / (tf.reduce_sum(vis) + 0.001))
+                    loss += losses[ip]
+                loss /= len(predicted_scoremaps)
+                tf.get_variable_scope().reuse_variables()
 
-# snapshot dir
-if not os.path.exists(train_para['snapshot_dir']):
-    os.mkdir(train_para['snapshot_dir'])
-    print('Created snapshot dir:', train_para['snapshot_dir'])
+                tower_losses.append(loss)
+                grad = opt.compute_gradients(loss)
+                tower_grads.append(grad)
 
-merged = tf.summary.merge_all()
-train_writer = tf.summary.FileWriter(train_para['snapshot_dir'] + '/train',
-                                      sess.graph)
+    total_loss = tf.reduce_mean(tower_losses)
+    grads = average_gradients(tower_grads)
+    tf.summary.scalar('loss', total_loss)
+    apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
 
-# PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_hue/model-40000'  # only used when USE_RETRAINED is true
-# saver.restore(sess, PATH_TO_SNAPSHOTS)
+    # Start TF
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.6)
+    sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+    sess.run(tf.global_variables_initializer())
+    tf.train.start_queue_runners(sess=sess)
 
-# Training loop
-print('Starting to train ...')
-for i in range(0, train_para['max_iter']):
-    summary, _, loss_v = sess.run([merged, train_op, loss])
-    train_writer.add_summary(summary, i)
+    # init weights
+    sess.run(tf.global_variables_initializer())
+    saver = tf.train.Saver()
 
-    if (i % train_para['show_loss_freq']) == 0:
-        print('Iteration %d\t Loss %.1e' % (i, loss_v))
-        sys.stdout.flush()
+    # snapshot dir
+    if not os.path.exists(train_para['snapshot_dir']):
+        os.mkdir(train_para['snapshot_dir'])
+        print('Created snapshot dir:', train_para['snapshot_dir'])
 
-    if (i % train_para['snapshot_freq']) == 0:
-        saver.save(sess, "%s/model" % train_para['snapshot_dir'], global_step=i)
-        print('Saved a snapshot.')
-        sys.stdout.flush()
+    merged = tf.summary.merge_all()
+    train_writer = tf.summary.FileWriter(train_para['snapshot_dir'] + '/train',
+                                          sess.graph)
+
+    if not fine_tune:
+        start_iter = 0
+        net.init_vgg(sess)
+    else:
+        saver.restore(sess, PATH_TO_SNAPSHOTS)
+        start_iter = already_trained + 1
+
+    # Training loop
+    print('Starting to train ...')
+    for i in range(start_iter, train_para['max_iter']):
+        summary, _, loss_v = sess.run([merged, apply_gradient_op, loss])
+        train_writer.add_summary(summary, i)
+
+        if (i % train_para['show_loss_freq']) == 0:
+            print('Iteration %d\t Loss %.2e' % (i, loss_v))
+            sys.stdout.flush()
+
+        if (i % train_para['snapshot_freq']) == 0:
+            saver.save(sess, "%s/model" % train_para['snapshot_dir'], global_step=i)
+            print('Saved a snapshot.')
+            sys.stdout.flush()
 
 
-print('Training finished. Saving final snapshot.')
-saver.save(sess, "%s/model" % train_para['snapshot_dir'], global_step=train_para['max_iter'])
+    print('Training finished. Saving final snapshot.')
+    saver.save(sess, "%s/model" % train_para['snapshot_dir'], global_step=train_para['max_iter'])

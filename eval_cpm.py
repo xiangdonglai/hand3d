@@ -48,7 +48,7 @@ image_crop = image_crop[:, :, ::-1, ::-1] # convert to BGR
 net = CPM(out_chan=22)
 
 # feed through network
-scoremap = net.inference(image_crop)
+scoremap = net.inference(image_crop)[-1]
 
 # Start TF
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
