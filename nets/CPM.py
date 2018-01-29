@@ -69,4 +69,4 @@ class CPM(object):
                 x = ops.conv(x, 'Mconv7_stage{}'.format(stage_id), kernel_size=1, stride=1, out_chan=self.out_chan, trainable=train)
                 scoremaps.append(x)
 
-        return scoremaps
+        return scoremaps, conv5_3

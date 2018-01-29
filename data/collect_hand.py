@@ -167,9 +167,7 @@ else:
 
             for hand in hands:
                 if len(hand['hand2d']) > 0:
-                    if seqName == '171204_pose5':
-                        continue
-                    if seqName == '171204_pose4':
+                    if seqName == '171204_pose5' or seqName == '171204_pose6':
                         testing_data.append(hand)
                     else:
                         training_data.append(hand)

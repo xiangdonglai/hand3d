@@ -23,7 +23,10 @@ import sys
 
 from nets.E2ENet import E2ENet
 from data.BinaryDbReaderSTB import BinaryDbReaderSTB
+from data.DomeReader import DomeReader
 from utils.general import LearningRateScheduler
+from utils.multigpu import average_gradients
+from tensorflow.python.client import device_lib
 
 def visualize(heatmap_3d, image_crop):
     import numpy as np
@@ -41,87 +44,132 @@ def visualize(heatmap_3d, image_crop):
     plot_hand_3d(keypoints, ax)
     plt.show()
 
-# training parameters
-# train_para = {'lr': [1e-5, 1e-6],
-#               'lr_iter': [60000],
-#               'max_iter': 80000,
-#               'show_loss_freq': 1000,
-#               'snapshot_freq': 5000,
-#               'snapshot_dir': 'snapshots_lifting_%s_dome' % VARIANT}
+num_gpu = sum([_.device_type == 'GPU' for _ in device_lib.list_local_devices()])
+fine_tune = False
+already_trained = 0
+PATH_TO_SNAPSHOTS = ''
 train_para = {'lr': [1e-4, 1e-5],
-              'lr_iter': [20000],
-              'max_iter': 40000,
+              'lr_iter': [40000],
+              'max_iter': 80000,
               'show_loss_freq': 100,
               'snapshot_freq': 5000,
               'snapshot_dir': 'snapshots_e2e',
+              'loss_weight_2d': 1.0,
+              'model_2d': './weights/cpm_tf.pickle'
               }
 
-# get dataset
-dataset = BinaryDbReaderSTB(mode='training',
-                         batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False,
-                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
+lifting_dict = {'method': 'direct'}
 
-# build network graph
-data = dataset.get()
+with tf.Graph().as_default(), tf.device('/cpu:0'):
+    # get dataset
+    dataset = DomeReader(mode='training',
+                             batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size=368,
+                             crop_size_zoom=2.0, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=False)
 
-# build network
-net = E2ENet(32)
+    # build network graph
+    data = dataset.get(read_image=True, extra=True)
 
-# feed trough network
-heatmap_3d, heatmap_2d = net.inference(data['image_crop'], train=True)
+    for k, v in data.items():
+        data[k] = tf.split(v, num_gpu, 0)
 
-# Start TF
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
-sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
-sess.run(tf.global_variables_initializer())
-tf.train.start_queue_runners(sess=sess)
+    # Solver
+    if fine_tune:
+        global_step = tf.Variable(already_trained+1, trainable=False, name="global_step")
+    else:
+        global_step = tf.Variable(0, trainable=False, name="global_step")
+    lr_scheduler = LearningRateScheduler(values=train_para['lr'], steps=train_para['lr_iter'])
+    lr = lr_scheduler.get_lr(global_step)
+    opt = tf.train.AdamOptimizer(lr)
 
-# Loss
-assert len(heatmap_2d) == 3
-loss_2d = 0.0
-for i, pred_item in enumerate(heatmap_2d):
-    loss_2d += tf.reduce_mean(tf.square(pred_item - tf.image.resize_images(data['scoremap'], (32, 32)))) / 3
-loss_3d = tf.reduce_mean(tf.square(heatmap_3d - data['scoremap_3d']))
-loss = loss_3d + loss_2d
-tf.summary.scalar('loss', loss)
+    tower_grads  = []
+    tower_losses = []
+    tower_losses_3d = []
+    tower_losses_2d = []
 
-# Solver
-global_step = tf.Variable(0, trainable=False, name="global_step")
-lr_scheduler = LearningRateScheduler(values=train_para['lr'], steps=train_para['lr_iter'])
-lr = lr_scheduler.get_lr(global_step)
-opt = tf.train.AdamOptimizer(lr)
-train_op = opt.minimize(loss)
+    evaluation = tf.placeholder_with_default(False, shape=())
 
-# init weights
-sess.run(tf.global_variables_initializer())
-# net.init(sess, weight_files=['./weights/handsegnet-rhd.pickle', train_para['org_weight']])
-saver = tf.train.Saver(max_to_keep=None)
+    with tf.variable_scope(tf.get_variable_scope()):
+        for ig in range(num_gpu):
+            with tf.device('/gpu:%d' % ig):
 
-merged = tf.summary.merge_all()
-train_writer = tf.summary.FileWriter(train_para['snapshot_dir'] + '/train',
-                                      sess.graph)
+                # build network
+                net = E2ENet(lifting_dict, out_chan=22, crop_size=368)
+                rel_dict = net.inference(data['image_crop'][ig], evaluation, train=True)
 
-# snapshot dir
-if not os.path.exists(train_para['snapshot_dir']):
-    os.mkdir(train_para['snapshot_dir'])
-    print('Created snapshot dir:', train_para['snapshot_dir'])
+                # Loss
+                predicted_scoremaps = rel_dict['heatmap_2d']
+                assert len(predicted_scoremaps) == 6
 
-# Training loop
-print('Starting to train ...')
-for i in range(train_para['max_iter']):
-    summary, _, loss_v, heatmap_3d_v, image_crop_v, loss_3d_v, loss_2d_v = sess.run([merged, train_op, loss, data['scoremap_3d'], data['image_crop'], loss_3d, loss_2d])
-    train_writer.add_summary(summary, i)
+                s = data['scoremap'][ig].get_shape().as_list()
+                ext_vis = tf.concat([data['keypoint_vis21'][ig], tf.ones([s[0], 1], dtype=tf.bool)], axis=1)
+                vis = tf.cast(tf.reshape(ext_vis, [s[0], s[3]]), tf.float32)
+                loss_2d = 0.0
+                for ip, predicted_scoremap in enumerate(predicted_scoremaps):
+                    resized_scoremap = tf.image.resize_images(predicted_scoremap, (s[1], s[2]))
+                    loss_2d += tf.reduce_sum(vis * tf.reduce_mean(tf.square(resized_scoremap - data['scoremap'][ig]), [1, 2])) / (tf.reduce_sum(vis) + 0.001)
+                    loss_2d /= len(predicted_scoremaps)
 
-    # visualize(heatmap_3d_v, image_crop_v)
+                if lifting_dict['method'] == 'direct':
+                    loss_3d = (tf.reduce_mean(tf.square(rel_dict['coord_xyz_can'] - data['keypoint_xyz21_can'][ig])) + tf.reduce_mean(tf.square(rel_dict['rot_mat'] - data['rot_mat'][ig])))
 
-    if (i % train_para['show_loss_freq']) == 0:
-        print('Iteration %d\t Loss %.1e, Loss_3d %.1e, Loss_2d %.1e' % (i, loss_v, loss_3d_v, loss_2d_v))
-        sys.stdout.flush()
+                loss = loss_3d + loss_2d * train_para['loss_weight_2d']
+                tf.get_variable_scope().reuse_variables()
 
-    if (i % train_para['snapshot_freq']) == 0:
-        saver.save(sess, "%s/model" % train_para['snapshot_dir'], global_step=i)
-        print('Saved a snapshot.')
-        sys.stdout.flush()
+                tower_losses.append(loss)
+                tower_losses_3d.append(loss_3d)
+                tower_losses_2d.append(loss_2d)
+                grad = opt.compute_gradients(loss)
+                tower_grads.append(grad)
 
-print('Training finished. Saving final snapshot.')
-saver.save(sess, "%s/model" % train_para['snapshot_dir'], global_step=train_para['max_iter'])
+    total_loss = tf.reduce_mean(tower_losses)
+    total_loss_3d = tf.reduce_mean(tower_losses_3d)
+    total_loss_2d = tf.reduce_mean(tower_losses_2d)
+    grads = average_gradients(tower_grads)
+    apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
+
+    # Start TF
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
+    sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+    sess.run(tf.global_variables_initializer())
+    tf.train.start_queue_runners(sess=sess)
+
+    tf.summary.scalar('loss', loss)
+    tf.summary.scalar('loss_3d', loss_3d)
+    tf.summary.scalar('loss_2d', loss_2d)
+
+    # init weights
+    sess.run(tf.global_variables_initializer())
+    saver = tf.train.Saver(max_to_keep=None)
+
+    merged = tf.summary.merge_all()
+    train_writer = tf.summary.FileWriter(train_para['snapshot_dir'] + '/train',
+                                          sess.graph)
+    if not fine_tune:
+        net.init(sess, weight_files=[train_para['model_2d']])
+    else:
+        save.restore(sess, PATH_TO_SNAPSHOTS)
+
+    # snapshot dir
+    if not os.path.exists(train_para['snapshot_dir']):
+        os.mkdir(train_para['snapshot_dir'])
+        print('Created snapshot dir:', train_para['snapshot_dir'])
+
+    # Training loop
+    print('Starting to train ...')
+    for i in range(train_para['max_iter']):
+        summary, _, loss_v, loss_3d_v, loss_2d_v = sess.run([merged, apply_gradient_op, loss, loss_3d, loss_2d])
+        train_writer.add_summary(summary, i)
+
+        # visualize(heatmap_3d_v, image_crop_v)
+
+        if (i % train_para['show_loss_freq']) == 0:
+            print('Iteration %d\t Loss %.1e, Loss_3d %.1e, Loss_2d %.1e' % (i, loss_v, loss_3d_v, loss_2d_v))
+            sys.stdout.flush()
+
+        if (i % train_para['snapshot_freq']) == 0:
+            saver.save(sess, "%s/model" % train_para['snapshot_dir'], global_step=i)
+            print('Saved a snapshot.')
+            sys.stdout.flush()
+
+    print('Training finished. Saving final snapshot.')
+    saver.save(sess, "%s/model" % train_para['snapshot_dir'], global_step=train_para['max_iter'])

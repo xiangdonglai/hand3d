@@ -52,7 +52,7 @@ def project2D(joints, calib, imgwh=None, applyDistort=True):
 
 class DomeReader(object):
 
-    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False,
+    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, crop_size_zoom=1.25, crop_size=256,
         coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False, a2=True, a4=True):
 
         self.image_root = '/media/posefs0c/panopticdb/'
@@ -70,6 +70,7 @@ class DomeReader(object):
         self.crop_offset_noise = crop_offset_noise
         self.crop_offset_noise_sigma = 10.0  # translates the crop after size calculation (this can move keypoints outside)
         self.crop_scale_noise = crop_scale_noise
+        self.crop_size_zoom = crop_size_zoom
 
         t_data = []
         self.camera_data = dict()
@@ -118,7 +119,7 @@ class DomeReader(object):
                 self.camera_data[key] = value
 
         self.image_size = (1080, 1920)
-        self.crop_size = 256
+        self.crop_size = crop_size
 
         # Building a list of tensors
         joints3d = []
@@ -155,7 +156,7 @@ class DomeReader(object):
         self.img_dirs = tf.constant(np.array(img_dirs))
         print('loaded DomeDB with number of samples {}'.format(self.num_samples))
 
-    def get(self, read_image=False):
+    def get(self, read_image=False, extra=False):
 
         [joint3d, joint2d, hand_side, img_dir] = tf.train.slice_input_producer([self.joints3d, self.joints2d, self.hand_sides, self.img_dirs], shuffle=False)
         keypoint_xyz21 = joint3d
@@ -223,12 +224,12 @@ class DomeReader(object):
             crop_size_best = tf.cond(tf.reduce_all(tf.is_finite(crop_size_best)), lambda: crop_size_best,
                                   lambda: tf.constant(200.0))
             crop_size_best.set_shape([])
-            crop_size_best *= 1.25
+            crop_size_best *= self.crop_size_zoom
+            crop_size_best *= crop_scale_noise
 
             # calculate necessary scaling
             scale = tf.cast(self.crop_size, tf.float32) / crop_size_best
-            scale = tf.minimum(tf.maximum(scale, 1.0), 10.0)
-            scale *= crop_scale_noise
+            # scale = tf.minimum(tf.maximum(scale, 1.0), 10.0)
             data_dict['crop_scale'] = scale
 
             if self.crop_offset_noise:
@@ -260,7 +261,8 @@ class DomeReader(object):
         scoremap = self.create_multiple_gaussian_map(keypoint_hw21,
                                                      scoremap_size,
                                                      self.sigma,
-                                                     valid_vec=keypoint_vis21)
+                                                     valid_vec=keypoint_vis21,
+                                                     extra=extra)
 
         data_dict['scoremap'] = scoremap
         
@@ -284,7 +286,7 @@ class DomeReader(object):
 
 
     @staticmethod
-    def create_multiple_gaussian_map(coords_uv, output_size, sigma, valid_vec=None):
+    def create_multiple_gaussian_map(coords_uv, output_size, sigma, valid_vec=None, extra=False):
         """ Creates a map of size (output_shape[0], output_shape[1]) at (center[0], center[1])
             with variance sigma for multiple coordinates."""
         with tf.name_scope('create_multiple_gaussian_map'):
@@ -329,6 +331,11 @@ class DomeReader(object):
             dist = tf.square(X_b) + tf.square(Y_b)
 
             scoremap = tf.exp(-dist / tf.square(sigma)) * tf.cast(cond, tf.float32)
+
+            if extra:
+                negative = 1 - tf.reduce_sum(scoremap, axis=2, keep_dims=True)
+                negative = tf.minimum(tf.maximum(negative, 0.0), 1.0)
+                scoremap = tf.concat([scoremap, negative], axis=2)
 
             return scoremap
 

@@ -43,14 +43,10 @@ args = parser.parse_args()
 
 # flag that allows to load a retrained snapshot(original weights used in the paper are used otherwise)
 USE_RETRAINED = True
-PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_wrist_vgg/'  # only used when USE_RETRAINED is true
+PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_s10_vgg/'  # only used when USE_RETRAINED is true
 
 # get dataset
-# dataset = BinaryDbReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False)
-# dataset = DomeReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, a2=False, a4=True)
-# dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=False, crop_size=368)
 dataset = ManualDBReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=True, crop_size=368)
-# dataset = TsimonDBReader(mode='training', shuffle=False, hand_crop=True, use_wrist_coord=False, crop_size=368)
 
 # build network graph
 data = dataset.get(read_image=True)
@@ -58,10 +54,9 @@ data = dataset.get(read_image=True)
 
 # build network
 evaluation = tf.placeholder_with_default(True, shape=())
-# net = ColorHandPose3DNetwork()
 net = CPM(crop_size=368, out_chan=22)
-# keypoints_scoremap = net.inference_pose2d(data['image_crop'])
-keypoints_scoremap = net.inference(data['image_crop'])
+# data['image_crop'] = data['image_crop'][:, :, :, ::-1] # convert to BGR (for tomas model)
+keypoints_scoremap, _ = net.inference(data['image_crop'])
 keypoints_scoremap = keypoints_scoremap[-1]
 
 # upscale to original size
@@ -83,7 +78,7 @@ if USE_RETRAINED:
     print('loading weights from {}'.format(last_cpt))
 else:
     # load weights used in the paper
-    net.init(sess, weight_files=['./weights/posenet-rhd-stb.pickle'], exclude_var_list=['PosePrior', 'ViewpointNet'])
+    net.init('./weights/pose_model.npy', sess)
 
 util = EvalUtil()
 # iterate dataset
@@ -107,13 +102,17 @@ for i in range(dataset.num_samples):
     # detect keypoints
     coord_hw_pred_crop = detect_keypoints(np.squeeze(keypoints_scoremap_v))
     coord_hw_pred_crop = coord_hw_pred_crop[:21, :]
+    if not USE_RETRAINED:
+        for ik in (1, 5, 9, 13, 17):
+            coord_hw_pred_crop[ik:ik+4] = coord_hw_pred_crop[ik+3:ik-1:-1] # reverse the order of fingers (from palm to tip)
     coord_uv_pred_crop = np.stack([coord_hw_pred_crop[:, 1], coord_hw_pred_crop[:, 0]], 1)
 
     image_crop = np.squeeze((image_crop+0.5)*255).astype(np.uint8)
 
-    # kp_uv21_gt[0, :] = 2 * kp_uv21_gt[0, :] - kp_uv21_gt[12, :]
-    # coord_uv_pred_crop[0, :] = 2 * coord_uv_pred_crop[0, :] - coord_uv_pred_crop[12, :]
-    # coord_hw_pred_crop[0, :] = 2 * coord_hw_pred_crop[0, :] - coord_hw_pred_crop[12, :]
+    if not dataset.use_wrist_coord:
+        kp_uv21_gt[0, :] = 2 * kp_uv21_gt[0, :] - kp_uv21_gt[12, :]
+        coord_uv_pred_crop[0, :] = 2 * coord_uv_pred_crop[0, :] - coord_uv_pred_crop[12, :]
+        coord_hw_pred_crop[0, :] = 2 * coord_hw_pred_crop[0, :] - coord_hw_pred_crop[12, :]
     util.feed(kp_uv21_gt/crop_scale/(head_size*0.7), kp_vis, coord_uv_pred_crop/crop_scale/(head_size*0.7))
 
     if (i % 100) == 0:
