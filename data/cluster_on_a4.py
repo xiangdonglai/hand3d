@@ -45,7 +45,7 @@ def canonical_3d(keypoint3d, flip):
     return normalized
 
 if __name__ == '__main__':
-    # hand_data_a4 with 171026_pose1-3, 171204_pose1,3-5
+    # hand_data_a4 with 171026_pose1-3, 171204_pose1-6
     path_to_db = './data/hand_data_a4.json'
     with open(path_to_db) as f:
         json_data_a4 = json.load(f)

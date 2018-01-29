@@ -23,13 +23,15 @@ import sys
 
 from nets.CPM import CPM
 from data.TsimonDBReader import TsimonDBReader
+from data.DomeReader import DomeReader
+from data.MultiDataset import MultiDataset
 from utils.general import LearningRateScheduler, load_weights_from_snapshot
 from utils.multigpu import average_gradients
 from tensorflow.python.client import device_lib
 
 num_gpu = sum([_.device_type == 'GPU' for _ in device_lib.list_local_devices()])
 fine_tune = False
-already_trained = 19992
+already_trained = 30000
 PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_s10_wrist_vgg/model-{}'.format(already_trained)  # only used when USE_RETRAINED is true
 # training parameters
 train_para = {'lr': [1e-4, 1e-5, 1e-6],
@@ -37,13 +39,19 @@ train_para = {'lr': [1e-4, 1e-5, 1e-6],
               'max_iter': int(200000/num_gpu),
               'show_loss_freq': 100,
               'snapshot_freq': int(5000/num_gpu),
-              'snapshot_dir': 'snapshots_cpm_rotate_s10_wrist_vgg'}
+              'snapshot_dir': 'snapshots_cpm_rotate_s10_wrist_dome'}
 
 with tf.Graph().as_default(), tf.device('/cpu:0'):
     # get dataset
-    dataset = TsimonDBReader(mode='training',
-                             batch_size=8*num_gpu, shuffle=True, use_wrist_coord=True, crop_size=368, sigma=10.0, random_rotate=True, random_hue=False,
-                             hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True)
+    datasets = [
+        TsimonDBReader(mode='training',
+                             batch_size=4*num_gpu, shuffle=True, use_wrist_coord=True, crop_size=368, sigma=10.0, random_rotate=True, random_hue=False,
+                             hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True),
+        DomeReader(mode='training', flip_2d=True, applyDistort=True,
+                             batch_size=4*num_gpu, shuffle=True, use_wrist_coord=True, crop_size=368, sigma=10.0, crop_size_zoom=2.0,
+                             hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True, a4=True, a2=True)
+    ]
+    dataset = MultiDataset(datasets)
 
     # build network graph
     data = dataset.get(read_image=True, extra=True)
@@ -113,7 +121,8 @@ with tf.Graph().as_default(), tf.device('/cpu:0'):
 
     if not fine_tune:
         start_iter = 0
-        net.init_vgg(sess)
+        net.init_pickle(sess, ['./snapshots_cpm_rotate_s10_wrist_vgg/model-30000.pickle'])
+        # net.init_vgg(sess)
     else:
         saver.restore(sess, PATH_TO_SNAPSHOTS)
         start_iter = already_trained + 1

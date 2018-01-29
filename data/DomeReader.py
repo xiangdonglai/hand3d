@@ -52,18 +52,18 @@ def project2D(joints, calib, imgwh=None, applyDistort=True):
 
 class DomeReader(object):
 
-    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, crop_size_zoom=1.25, crop_size=256,
-        coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False, a2=True, a4=True):
+    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, crop_size_zoom=1.25, crop_size=256, sigma=25.0, applyDistort=False,
+        coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False, a2=True, a4=True, flip_2d=False):
 
         self.image_root = '/media/posefs0c/panopticdb/'
 
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.hand_crop = hand_crop
-        assert self.hand_crop
+        # assert self.hand_crop
         self.use_wrist_coord = use_wrist_coord
         self.coord_uv_noise = coord_uv_noise
-        self.sigma = 25.0
+        self.sigma = sigma
         self.coord_uv_noise_sigma = 2.5  # std dev in px of noise on the uv coordinates
         self.crop_center_noise = crop_center_noise
         self.crop_center_noise_sigma = 20.0  # std dev in px: this moves what is in the "center", but the crop always contains all keypoints
@@ -71,6 +71,7 @@ class DomeReader(object):
         self.crop_offset_noise_sigma = 10.0  # translates the crop after size calculation (this can move keypoints outside)
         self.crop_scale_noise = crop_scale_noise
         self.crop_size_zoom = crop_size_zoom
+        self.flip_2d = flip_2d
 
         t_data = []
         self.camera_data = dict()
@@ -138,7 +139,7 @@ class DomeReader(object):
                 seqName = hand3d['seqName']
                 frame_str = hand3d['frame_str']
                 calib = self.camera_data[seqName][camIdx]
-                joint2d, joint3d_rotated = project2D(joint3d, calib, applyDistort=False)
+                joint2d, joint3d_rotated = project2D(joint3d, calib, applyDistort=applyDistort)
                 joints3d.append(joint3d_rotated)
                 joints2d.append(joint2d)
                 hand_sides.append(hand3d['lr'])
@@ -171,6 +172,7 @@ class DomeReader(object):
             keypoint_uv21 += noise
 
         data_dict = {}
+        data_dict['img_dir'] = img_dir
         data_dict['hand_side'] = tf.one_hot(tf.cast(hand_side, tf.uint8), depth=2, on_value=1.0, off_value=0.0, dtype=tf.float32)
 
         keypoint_vis21 = tf.ones([21,], tf.bool)
@@ -238,7 +240,12 @@ class DomeReader(object):
 
             # Modify uv21 coordinates
             crop_center_float = tf.cast(crop_center, tf.float32)
-            keypoint_uv21_u = (keypoint_uv21[:, 0] - crop_center_float[1]) * scale + self.crop_size // 2
+            if self.flip_2d:
+                keypoint_uv21_u = tf.cond(hand_side,
+                    lambda: -(keypoint_uv21[:, 0] - crop_center_float[1]) * scale + self.crop_size // 2,
+                    lambda: (keypoint_uv21[:, 0] - crop_center_float[1]) * scale + self.crop_size // 2)
+            else:
+                keypoint_uv21_u = (keypoint_uv21[:, 0] - crop_center_float[1]) * scale + self.crop_size // 2
             keypoint_uv21_v = (keypoint_uv21[:, 1] - crop_center_float[0]) * scale + self.crop_size // 2
             keypoint_uv21 = tf.stack([keypoint_uv21_u, keypoint_uv21_v], 1)
             data_dict['keypoint_uv21'] = keypoint_uv21            
@@ -246,10 +253,17 @@ class DomeReader(object):
         if read_image:
             img_file = tf.read_file(img_dir)
             image = tf.image.decode_image(img_file, channels=3)
+            image = tf.image.pad_to_bounding_box(image, 0, 0, 1080, 1920)
             image.set_shape((1080, 1920, 3))
-            image = tf.cast(image, tf.float32) / 255.0 - 0.5
-            img_crop = crop_image_from_xy(tf.expand_dims(image, 0), crop_center, self.crop_size, scale)
-            data_dict['image_crop'] = tf.squeeze(img_crop)
+            image = tf.cast(image, tf.float32)
+            data_dict['image'] = image / 255.0 - 0.5
+            if self.hand_crop:
+                img_crop = crop_image_from_xy(tf.expand_dims(image, 0), crop_center, self.crop_size, scale)
+                img_crop =  img_crop / 255.0 - 0.5
+                img_crop = tf.squeeze(img_crop)
+                if self.flip_2d:
+                    img_crop = tf.cond(hand_side, lambda: img_crop[:, ::-1, :], lambda: img_crop)
+                data_dict['image_crop'] = img_crop
 
         keypoint_hw21 = tf.stack([keypoint_uv21[:, 1], keypoint_uv21[:, 0]], -1)
 
@@ -340,34 +354,47 @@ class DomeReader(object):
             return scoremap
 
 if __name__ == '__main__':
-    d = DomeReader(mode='training',
-                         batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False,
-                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=False, a2=True)
-    # data = d.get(read_image=True)
-    # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
-    # sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
-    # sess.run(tf.global_variables_initializer())
-    # tf.train.start_queue_runners(sess=sess)
+    d = DomeReader(mode='training', flip_2d=True,
+                         batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size_zoom=2.0,
+                         crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False, applyDistort=True)
 
-    # from utils.general import detect_keypoints_3d, plot_hand_3d
-    # import matplotlib.pyplot as plt
-    # from mpl_toolkits.mplot3d import Axes3D
+    data = d.get(read_image=True)
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
+    sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+    sess.run(tf.global_variables_initializer())
+    tf.train.start_queue_runners(sess=sess)
 
-    # for i in range(50):
+    from utils.general import detect_keypoints_3d, plot_hand_3d, plot_hand, detect_keypoints
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
 
-    #     scoremap_3d, keypoint_xyz21_normed = sess.run([data['scoremap_3d'], data['keypoint_xyz21_normed']])
-    #     scoremap_3d = np.squeeze(scoremap_3d)
-    #     keypoint_xyz21_normed = np.squeeze(keypoint_xyz21_normed)
+    for i in range(50):
 
-    #     keypoints = detect_keypoints_3d(scoremap_3d)
+        scoremap_3d, keypoint_xyz21_normed, image_crop, keypoint_uv21, img_dir, scoremap \
+            = sess.run([data['scoremap_3d'], data['keypoint_xyz21_normed'], data['image_crop'], data['keypoint_uv21'], data['img_dir'], data['scoremap']])
+        print(img_dir[0].decode())
+        scoremap_3d = np.squeeze(scoremap_3d)
+        keypoint_xyz21_normed = np.squeeze(keypoint_xyz21_normed)
+        image_crop = np.squeeze((image_crop + 0.5) * 255).astype(np.uint8)
+        keypoint_uv21 = np.squeeze(keypoint_uv21)
+        scoremap = np.squeeze(scoremap)
 
-    #     fig = plt.figure()
-    #     ax = fig.add_subplot(121, projection='3d')
-    #     plot_hand_3d(keypoints, ax)
-    #     ax = fig.add_subplot(122, projection='3d')
-    #     plot_hand_3d(keypoint_xyz21_normed, ax)
-    #     plt.show()
+        keypoints = detect_keypoints_3d(scoremap_3d)
+        keypoints2d = detect_keypoints(scoremap)
 
-    #     img_crop = sess.run(data['image_crop'])
-    #     plt.imshow(((img_crop[0]+0.5)*255).astype(np.uint8))
-    #     plt.show()
+        fig = plt.figure()
+        ax = fig.add_subplot(221, projection='3d')
+        plot_hand_3d(keypoints, ax)
+        ax.invert_yaxis()
+        ax.invert_zaxis()
+        ax = fig.add_subplot(222, projection='3d')
+        plot_hand_3d(keypoint_xyz21_normed, ax)
+        ax.invert_yaxis()
+        ax.invert_zaxis()
+        ax = fig.add_subplot(223)
+        ax.imshow(image_crop)
+        plot_hand(keypoint_uv21[:, ::-1], ax)
+        ax = fig.add_subplot(224)
+        ax.imshow(image_crop)
+        plot_hand(keypoints2d, ax)
+        plt.show()

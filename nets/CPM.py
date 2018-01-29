@@ -21,6 +21,29 @@ class CPM(object):
                         sess.run(var.assign(data))
         print('Finish loading weight from {}'.format(weight_path))
 
+    def init_pickle(self, session, weight_files=None, exclude_var_list=None):
+        """ Initializes weights from pickled python dictionaries.
+
+            Inputs:
+                session: tf.Session, Tensorflow session object containing the network graph
+                weight_files: list of str, Paths to the pickle files that are used to initialize network weights
+                exclude_var_list: list of str, Weights that should not be loaded
+        """
+        if exclude_var_list is None:
+            exclude_var_list = list()
+
+        import pickle, os
+        # Initialize with weights
+        for file_name in weight_files:
+            assert os.path.exists(file_name), "File not found."
+            with open(file_name, 'rb') as fi:
+                weight_dict = pickle.load(fi)
+                weight_dict = {k: v for k, v in weight_dict.items() if not any([x in k for x in exclude_var_list])}
+                if len(weight_dict) > 0:
+                    init_op, init_feed = tf.contrib.framework.assign_from_values(weight_dict)
+                    session.run(init_op, init_feed)
+                    print('Loaded %d variables from %s' % (len(weight_dict), file_name))
+
     def init_vgg(self, sess, weight_path='./weights/vgg16.npy'):
         with tf.variable_scope("CPM"):
             data_dict = np.load(weight_path, encoding='latin1').item()

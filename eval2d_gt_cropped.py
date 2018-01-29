@@ -43,7 +43,7 @@ args = parser.parse_args()
 
 # flag that allows to load a retrained snapshot(original weights used in the paper are used otherwise)
 USE_RETRAINED = True
-PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_s10_vgg/'  # only used when USE_RETRAINED is true
+PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_wrist_vgg/'  # only used when USE_RETRAINED is true
 
 # get dataset
 dataset = ManualDBReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=True, crop_size=368)

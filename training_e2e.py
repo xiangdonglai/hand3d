@@ -48,23 +48,23 @@ num_gpu = sum([_.device_type == 'GPU' for _ in device_lib.list_local_devices()])
 fine_tune = False
 already_trained = 0
 PATH_TO_SNAPSHOTS = ''
-train_para = {'lr': [1e-4, 1e-5],
-              'lr_iter': [40000],
-              'max_iter': 80000,
+train_para = {'lr': [1e-5, 1e-6],
+              'lr_iter': [int(100000/num_gpu)],
+              'max_iter': int(200000/num_gpu),
               'show_loss_freq': 100,
-              'snapshot_freq': 5000,
+              'snapshot_freq': int(2000/num_gpu),
               'snapshot_dir': 'snapshots_e2e',
-              'loss_weight_2d': 1.0,
-              'model_2d': './weights/cpm_tf.pickle'
+              'loss_weight_2d': 10.0,
+              'model_2d': 'snapshots_cpm_rotate_s10_wrist_vgg/model-60000.pickle'
               }
 
 lifting_dict = {'method': 'direct'}
 
 with tf.Graph().as_default(), tf.device('/cpu:0'):
     # get dataset
-    dataset = DomeReader(mode='training',
-                             batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size=368,
-                             crop_size_zoom=2.0, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=False)
+    dataset = DomeReader(mode='training', flip_2d=True, applyDistort=True,
+                             batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=True, crop_size=368, sigma=10.0,
+                             crop_size_zoom=2.0, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False)
 
     # build network graph
     data = dataset.get(read_image=True, extra=True)
