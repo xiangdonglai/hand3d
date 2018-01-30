@@ -28,6 +28,7 @@ import pdb
 
 from data.BinaryDbReader import *
 from data.BinaryDbReaderSTB import *
+from data.DomeReader import DomeReader
 from nets.E2ENet import E2ENet
 from nets.CPM import CPM
 from utils.general import EvalUtil, get_stb_ref_curves, calc_auc, plot_hand_3d, detect_keypoints, trafo_coords, plot_hand, detect_keypoints_3d, hand_size, load_weights_from_snapshot
@@ -39,17 +40,22 @@ args = parser.parse_args()
 
 # get dataset
 # dataset = BinaryDbReader(mode='evaluation', shuffle=False, use_wrist_coord=False)
-dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, use_wrist_coord=False, hand_crop=True)
+# dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, use_wrist_coord=False, hand_crop=True)
+dataset = DomeReader(mode='evaluation', shuffle=False, use_wrist_coord=True, hand_crop=True, crop_size=368, crop_size_zoom=2.0, flip_2d=True, a2=False, applyDistort=True)
 
 # build network graph
 data = dataset.get()
 image_crop = data['image_crop']
+# lifting_dict = {'method': 'direct'}
+lifting_dict = {'method': 'heatmap'}
 # build network
-net = E2ENet(32)
-# net = CPM()
+net = E2ENet(lifting_dict, out_chan=22, crop_size=368)
 
 # feed through network
-scoremap_3d, scoremap = net.inference(image_crop)
+evaluation = tf.placeholder_with_default(True, shape=())
+rel_dict = net.inference(image_crop, evaluation, train=False)
+s = image_crop.get_shape().as_list()
+heatmap_2d = tf.image.resize_images(rel_dict['heatmap_2d'][-1], (s[1], s[2]))
 
 # Start TF
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
@@ -57,30 +63,41 @@ sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
-cpt = 'snapshots_e2e/model-40000'
+# cpt = 'snapshots_e2e/model-7000'
+cpt = 'snapshots_e2e_heatmap/model-10000'
 load_weights_from_snapshot(sess, cpt, discard_list=['Adam', 'global_step', 'beta'])
 
 util = EvalUtil()
 # iterate dataset
 for i in range(dataset.num_samples):
     # get prediction
-    keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21_v, image_crop_v, scoremap_3d_v, scoremap_v = \
-        sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, scoremap_3d, scoremap])
+    if lifting_dict['method'] == 'direct':
+        keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21, image_crop_v, coord_xyz_norm, scoremap_v = \
+            sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, rel_dict['coord_xyz_norm'], heatmap_2d])
+    elif lifting_dict['method'] == 'heatmap':
+        keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21, image_crop_v, scoremap_v, scoremap_3d_v = \
+            sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, heatmap_2d, rel_dict['heatmap_3d'][-1]])
 
     keypoint_xyz21 = np.squeeze(keypoint_xyz21)
     keypoint_vis21 = np.squeeze(keypoint_vis21)
     keypoint_scale = np.squeeze(keypoint_scale)
-    keypoint_uv21_v = np.squeeze(keypoint_uv21_v)
+    keypoint_uv21 = np.squeeze(keypoint_uv21)
     image_crop_v = np.squeeze((image_crop_v+0.5)*255).astype(np.uint8)
-    scoremap_3d_v = np.squeeze(scoremap_3d_v)
     scoremap_v = np.squeeze(scoremap_v)
 
-    # rescale to meters
-    coord3d_pred_v = detect_keypoints_3d(scoremap_3d_v)
-    coord3d_pred_v -= coord3d_pred_v[0, :]
-    coord3d_pred_v *= keypoint_scale / hand_size(coord3d_pred_v)
-    coord2d_v = detect_keypoints(scoremap_v) * 8
+    coord2d_v = detect_keypoints(scoremap_v)
+    coord2d_v = coord2d_v[:21, :]
 
+    if lifting_dict['method'] == 'direct':
+        coord3d_pred_v = np.squeeze(coord_xyz_norm)
+    elif lifting_dict['method'] == 'heatmap':
+        scoremap_3d_v = np.squeeze(scoremap_3d_v)
+        coord3d_pred_v = detect_keypoints_3d(scoremap_3d_v)
+        coord3d_pred_v = coord3d_pred_v[:21, :]
+
+    coord3d_pred_v -= coord3d_pred_v[0, :]
+    # rescale to meters
+    coord3d_pred_v *= keypoint_scale / hand_size(coord3d_pred_v)
     # center gt
     keypoint_xyz21 -= keypoint_xyz21[0, :]
 
@@ -103,7 +120,8 @@ for i in range(dataset.num_samples):
 
             ax2 = fig.add_subplot(122)
             plt.imshow(image_crop_v)
-            plot_hand(coord2d_v, ax2)
+            plot_hand(coord2d_v, ax2, color_fixed=np.array([0.0, 0.0, 1.0]))
+            plot_hand(keypoint_uv21[:, ::-1], ax2, color_fixed=np.array([1.0, 0.0, 0.0]))
 
             plt.show()
             # pdb.set_trace()

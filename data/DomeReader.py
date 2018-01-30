@@ -157,7 +157,7 @@ class DomeReader(object):
         self.img_dirs = tf.constant(np.array(img_dirs))
         print('loaded DomeDB with number of samples {}'.format(self.num_samples))
 
-    def get(self, read_image=False, extra=False):
+    def get(self, read_image=True, extra=False):
 
         [joint3d, joint2d, hand_side, img_dir] = tf.train.slice_input_producer([self.joints3d, self.joints2d, self.hand_sides, self.img_dirs], shuffle=False)
         keypoint_xyz21 = joint3d
@@ -179,6 +179,8 @@ class DomeReader(object):
         data_dict['keypoint_vis21'] = keypoint_vis21
 
         keypoint_xyz21 /= 100 # convert dome (centimeter) to meter
+        if self.flip_2d:
+            keypoint_xyz21 = tf.cond(hand_side, lambda: tf.concat([tf.expand_dims(-keypoint_xyz21[:, 0], axis=1), keypoint_xyz21[:, 1:]], axis=1), lambda: keypoint_xyz21)
 
         kp_coord_xyz21 = keypoint_xyz21
         data_dict['keypoint_xyz21'] = keypoint_xyz21
@@ -196,7 +198,8 @@ class DomeReader(object):
         cond_left = tf.logical_and(tf.cast(tf.ones_like(kp_coord_xyz21), tf.bool), tf.logical_not(hand_side))
         kp_coord_xyz21_rel_can, rot_mat = canonical_trafo(data_dict['keypoint_xyz21_normed'])
         kp_coord_xyz21_rel_can, rot_mat = tf.squeeze(kp_coord_xyz21_rel_can), tf.squeeze(rot_mat)
-        kp_coord_xyz21_rel_can = flip_right_hand(kp_coord_xyz21_rel_can, tf.logical_not(cond_left))
+        if not self.flip_2d:
+            kp_coord_xyz21_rel_can = flip_right_hand(kp_coord_xyz21_rel_can, tf.logical_not(cond_left))
         data_dict['keypoint_xyz21_can'] = kp_coord_xyz21_rel_can
         data_dict['rot_mat'] = tf.matrix_inverse(rot_mat)
 
@@ -280,7 +283,7 @@ class DomeReader(object):
 
         data_dict['scoremap'] = scoremap
         
-        data_dict['scoremap_3d'], data_dict['scaled_center'] = create_multiple_gaussian_map_3d(data_dict['keypoint_xyz21_normed'], 32, 5)
+        data_dict['scoremap_3d'] = create_multiple_gaussian_map_3d(data_dict['keypoint_xyz21_normed'], int(self.crop_size/8), 5, extra=extra)
 
         names, tensors = zip(*data_dict.items())
 
@@ -354,9 +357,9 @@ class DomeReader(object):
             return scoremap
 
 if __name__ == '__main__':
-    d = DomeReader(mode='training', flip_2d=True,
-                         batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size_zoom=2.0,
-                         crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False, applyDistort=True)
+    d = DomeReader(mode='training', flip_2d=True, applyDistort=True,
+                             batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=True, crop_size=368, sigma=10.0,
+                             crop_size_zoom=2.0, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False)
 
     data = d.get(read_image=True)
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
@@ -370,9 +373,10 @@ if __name__ == '__main__':
 
     for i in range(50):
 
-        scoremap_3d, keypoint_xyz21_normed, image_crop, keypoint_uv21, img_dir, scoremap \
-            = sess.run([data['scoremap_3d'], data['keypoint_xyz21_normed'], data['image_crop'], data['keypoint_uv21'], data['img_dir'], data['scoremap']])
+        scoremap_3d, keypoint_xyz21_normed, image_crop, keypoint_uv21, img_dir, scoremap, hand_side \
+            = sess.run([data['scoremap_3d'], data['keypoint_xyz21_normed'], data['image_crop'], data['keypoint_uv21'], data['img_dir'], data['scoremap'], data['hand_side']])
         print(img_dir[0].decode())
+        print(hand_side)
         scoremap_3d = np.squeeze(scoremap_3d)
         keypoint_xyz21_normed = np.squeeze(keypoint_xyz21_normed)
         image_crop = np.squeeze((image_crop + 0.5) * 255).astype(np.uint8)

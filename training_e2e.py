@@ -45,9 +45,8 @@ def visualize(heatmap_3d, image_crop):
     plt.show()
 
 num_gpu = sum([_.device_type == 'GPU' for _ in device_lib.list_local_devices()])
-fine_tune = False
-already_trained = 0
-PATH_TO_SNAPSHOTS = ''
+fine_tune = True
+already_trained = 7000
 train_para = {'lr': [1e-5, 1e-6],
               'lr_iter': [int(100000/num_gpu)],
               'max_iter': int(200000/num_gpu),
@@ -58,6 +57,7 @@ train_para = {'lr': [1e-5, 1e-6],
               'model_2d': 'snapshots_cpm_rotate_s10_wrist_vgg/model-60000.pickle'
               }
 
+PATH_TO_SNAPSHOTS = './{}/model-{}'.format(train_para['snapshot_dir'], already_trained)  # only used when USE_RETRAINED is true
 lifting_dict = {'method': 'direct'}
 
 with tf.Graph().as_default(), tf.device('/cpu:0'):
@@ -86,6 +86,8 @@ with tf.Graph().as_default(), tf.device('/cpu:0'):
     tower_losses_3d = []
     tower_losses_2d = []
 
+    tower_losses_detail = {'pose': [], 'view': []}
+
     evaluation = tf.placeholder_with_default(False, shape=())
 
     with tf.variable_scope(tf.get_variable_scope()):
@@ -110,7 +112,17 @@ with tf.Graph().as_default(), tf.device('/cpu:0'):
                     loss_2d /= len(predicted_scoremaps)
 
                 if lifting_dict['method'] == 'direct':
-                    loss_3d = (tf.reduce_mean(tf.square(rel_dict['coord_xyz_can'] - data['keypoint_xyz21_can'][ig])) + tf.reduce_mean(tf.square(rel_dict['rot_mat'] - data['rot_mat'][ig])))
+                    loss_pose = tf.reduce_mean(tf.square(rel_dict['coord_xyz_can'] - data['keypoint_xyz21_can'][ig]))
+                    loss_view = tf.reduce_mean(tf.square(rel_dict['rot_mat'] - data['rot_mat'][ig]))
+                    loss_3d = loss_pose + loss_view
+                    tower_losses_detail['pose'].append(loss_pose)
+                    tower_losses_detail['view'].append(loss_view)
+                elif lifting_dict['method'] == 'heatmap':
+                    predicted_scoremaps_3d = rel_dict['heatmap_3d']
+                    loss_3d = 0.0
+                    for ip, predicted_scoremap in enumerate(predicted_scoremaps_3d): 
+                        loss_3d += tf.reduce_sum(vis * tf.reduce_mean(tf.square(predicted_scoremap - data['scoremap_3d'][ig]), [1, 2, 3])) / (tf.reduce_sum(vis) + 0.001)
+                        loss_3d /= len(predicted_scoremaps_3d)
 
                 loss = loss_3d + loss_2d * train_para['loss_weight_2d']
                 tf.get_variable_scope().reuse_variables()
@@ -126,6 +138,8 @@ with tf.Graph().as_default(), tf.device('/cpu:0'):
     total_loss_2d = tf.reduce_mean(tower_losses_2d)
     grads = average_gradients(tower_grads)
     apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
+
+    total_loss_detail = {k: tf.reduce_mean(v) for k, v in tower_losses_detail.items() if len(v) > 0}
 
     # Start TF
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
@@ -145,9 +159,11 @@ with tf.Graph().as_default(), tf.device('/cpu:0'):
     train_writer = tf.summary.FileWriter(train_para['snapshot_dir'] + '/train',
                                           sess.graph)
     if not fine_tune:
+        start_iter = 0
         net.init(sess, weight_files=[train_para['model_2d']])
     else:
-        save.restore(sess, PATH_TO_SNAPSHOTS)
+        saver.restore(sess, PATH_TO_SNAPSHOTS)
+        start_iter = already_trained + 1
 
     # snapshot dir
     if not os.path.exists(train_para['snapshot_dir']):
@@ -156,14 +172,19 @@ with tf.Graph().as_default(), tf.device('/cpu:0'):
 
     # Training loop
     print('Starting to train ...')
-    for i in range(train_para['max_iter']):
-        summary, _, loss_v, loss_3d_v, loss_2d_v = sess.run([merged, apply_gradient_op, loss, loss_3d, loss_2d])
+    for i in range(start_iter, train_para['max_iter']):
+        if lifting_dict['method'] == 'direct':
+            summary, _, loss_v, loss_3d_v, loss_2d_v, loss_pose_v, loss_view_v = sess.run([merged, apply_gradient_op, loss, loss_3d, loss_2d, total_loss_detail['pose'], total_loss_detail['view']])
+        elif lifting_dict['method'] == 'heatmap':
+            summary, _, loss_v, loss_3d_v, loss_2d_v = sess.run([merged, apply_gradient_op, loss, loss_3d, loss_2d])
         train_writer.add_summary(summary, i)
 
         # visualize(heatmap_3d_v, image_crop_v)
 
         if (i % train_para['show_loss_freq']) == 0:
             print('Iteration %d\t Loss %.1e, Loss_3d %.1e, Loss_2d %.1e' % (i, loss_v, loss_3d_v, loss_2d_v))
+            if lifting_dict['method'] == 'direct':
+                print('Pose: %.1e, View: %.1e' % (loss_pose_v, loss_view_v))
             sys.stdout.flush()
 
         if (i % train_para['snapshot_freq']) == 0:

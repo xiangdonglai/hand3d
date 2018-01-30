@@ -42,8 +42,9 @@ parser.add_argument('--save', '-s', action='store_true')
 args = parser.parse_args()
 
 # flag that allows to load a retrained snapshot(original weights used in the paper are used otherwise)
-USE_RETRAINED = True
-PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_wrist_vgg/'  # only used when USE_RETRAINED is true
+USE_RETRAINED = False
+FREIBURG_ORDER = True
+PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_s10_wrist_dome/'  # only used when USE_RETRAINED is true
 
 # get dataset
 dataset = ManualDBReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=True, crop_size=368)
@@ -64,7 +65,7 @@ s = data['image_crop'].get_shape().as_list()
 keypoints_scoremap = tf.image.resize_images(keypoints_scoremap, (s[1], s[2]))
 
 # Start TF
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
 sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
@@ -78,7 +79,8 @@ if USE_RETRAINED:
     print('loading weights from {}'.format(last_cpt))
 else:
     # load weights used in the paper
-    net.init('./weights/pose_model.npy', sess)
+    # net.init('./weights/pose_model.npy', sess)
+    net.init_pickle(sess, ['./snapshots_cpm_rotate_s10_wrist_dome/model-40000.pickle'], ['scale'])
 
 util = EvalUtil()
 # iterate dataset
@@ -102,7 +104,7 @@ for i in range(dataset.num_samples):
     # detect keypoints
     coord_hw_pred_crop = detect_keypoints(np.squeeze(keypoints_scoremap_v))
     coord_hw_pred_crop = coord_hw_pred_crop[:21, :]
-    if not USE_RETRAINED:
+    if not FREIBURG_ORDER:
         for ik in (1, 5, 9, 13, 17):
             coord_hw_pred_crop[ik:ik+4] = coord_hw_pred_crop[ik+3:ik-1:-1] # reverse the order of fingers (from palm to tip)
     coord_uv_pred_crop = np.stack([coord_hw_pred_crop[:, 1], coord_hw_pred_crop[:, 0]], 1)

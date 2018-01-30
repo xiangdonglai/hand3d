@@ -12,7 +12,7 @@ class E2ENet(object):
         self.out_chan = out_chan
         self.cpm = CPM(self.crop_size, self.out_chan)
         self.lifting_dict = lifting_dict
-        assert lifting_dict['method'] in ['direct']
+        assert lifting_dict['method'] in ['direct', 'heatmap']
 
     def init(self, session, weight_files=None, exclude_var_list=None):
         """ Initializes weights from pickled python dictionaries.
@@ -38,7 +38,6 @@ class E2ENet(object):
                     init_op, init_feed = tf.contrib.framework.assign_from_values(weight_dict)
                     session.run(init_op, init_feed)
                     print('Loaded %d variables from %s' % (len(weight_dict), file_name))
-
 
     def inference(self, input_image, evaluation, train=False):
         heatmap_2d, encoding = self.cpm.inference(input_image, train)
@@ -111,6 +110,35 @@ class E2ENet(object):
                     coord_xyz_norm = tf.matmul(coord_xyz_can, rot_mat)
 
                     rel_dict = {'coord_xyz_norm': coord_xyz_norm, 'coord_xyz_can': coord_xyz_can, 'rot_mat': rot_mat, 'heatmap_2d': heatmap_2d}
+                    return rel_dict
+
+                elif self.lifting_dict['method'] == 'heatmap':
+                    with tf.variable_scope('heatmap'):
+                        assert s[1] == self.crop_size/8 and s[2] == self.crop_size/8
+                        s3d = s[1]
+
+                        x = ops.conv_relu(scoremap, 'lifting', kernel_size=1, stride=1, out_chan=s3d, trainable=train)
+                        x = tf.transpose(x, perm=[0, 3, 1, 2])
+                        encoding_3d = tf.expand_dims(x, -1)
+
+                        x = ops.conv3d_relu(encoding_3d, 'conv3d1_stage1', kernel_size=5, stride=1, out_chan=128, leaky=False, trainable=train)
+                        x = ops.conv3d_relu(x, 'conv3d2_stage1', kernel_size=5, stride=1, out_chan=128, leaky=False, trainable=train)
+                        x = ops.conv3d_relu(x, 'conv3d3_stage1', kernel_size=5, stride=1, out_chan=128, leaky=False, trainable=train)
+                        x = ops.conv3d_relu(x, 'conv3d4_stage1', kernel_size=1, stride=1, out_chan=128, leaky=False, trainable=train)
+                        x = ops.conv3d(x, 'conv3d5_stage1', kernel_size=1, stride=1, out_chan=self.out_chan, trainable=train)
+
+                        scoremap_3d = [x]
+
+                        for stage_id in range(2, 4):
+                            x = tf.concat([x, encoding_3d], axis=4)
+                            x = ops.conv3d_relu(x, 'conv3d1_stage{}'.format(stage_id), kernel_size=5, stride=1, out_chan=128, leaky=False, trainable=train)
+                            x = ops.conv3d_relu(x, 'conv3d2_stage{}'.format(stage_id), kernel_size=5, stride=1, out_chan=128, leaky=False, trainable=train)
+                            x = ops.conv3d_relu(x, 'conv3d3_stage{}'.format(stage_id), kernel_size=5, stride=1, out_chan=128, leaky=False, trainable=train)
+                            x = ops.conv3d_relu(x, 'conv3d4_stage{}'.format(stage_id), kernel_size=1, stride=1, out_chan=128, leaky=False, trainable=train)
+                            x = ops.conv3d(x, 'conv3d5_stage{}'.format(stage_id), kernel_size=1, stride=1, out_chan=self.out_chan, trainable=train)
+                            scoremap_3d.append(x)
+
+                    rel_dict = {'heatmap_3d': scoremap_3d, 'heatmap_2d': heatmap_2d}
                     return rel_dict
 
 

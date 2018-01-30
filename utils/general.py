@@ -88,9 +88,12 @@ class NetworkOps(object):
             return out_tensor
 
     @classmethod
-    def conv3d_relu(cls, in_tensor, layer_name, kernel_size, stride, out_chan, trainable=True):
+    def conv3d_relu(cls, in_tensor, layer_name, kernel_size, stride, out_chan, leaky=True, trainable=True):
         tensor = cls.conv3d(in_tensor, layer_name, kernel_size, stride, out_chan, trainable)
-        out_tensor = cls.leaky_relu(tensor, name='out')
+        if leaky:
+            out_tensor = cls.leaky_relu(tensor, name='out')
+        else:
+            out_tensor = cls.leaky_relu(tensor, name='out')
         return out_tensor
 
     @classmethod
@@ -827,7 +830,7 @@ def hand_size_tf(coords_xyz):
         s += tf.sqrt(tf.reduce_sum(tf.square(x1 - x2)))
     return s
 
-def create_multiple_gaussian_map_3d(keypoint_3d, output_size, sigma):
+def create_multiple_gaussian_map_3d(keypoint_3d, output_size, sigma, extra=False):
     """ Creates a 3D heatmap for the hand skeleton
     """
     with tf.name_scope('create_multiple_gaussian_map_3d'):
@@ -868,4 +871,9 @@ def create_multiple_gaussian_map_3d(keypoint_3d, output_size, sigma):
 
         scoremap_3d = tf.exp(-dist/tf.square(sigma))
 
-        return scoremap_3d, scaled_center
+        if extra:
+            negative = 1 - tf.reduce_sum(scoremap_3d, axis=3, keep_dims=True)
+            negative = tf.minimum(tf.maximum(negative, 0.0), 1.0)
+            scoremap_3d = tf.concat([scoremap_3d, negative], axis=3)
+
+        return scoremap_3d
