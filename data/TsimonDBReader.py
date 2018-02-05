@@ -9,7 +9,7 @@ import os
 
 class TsimonDBReader(object):
 
-    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, random_hue=False, random_rotate=False,
+    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, random_hue=False, random_rotate=False, crop_size_zoom=1.25,
         coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False, crop_size=256, sigma=25.0):
 
         self.batch_size = batch_size
@@ -28,6 +28,7 @@ class TsimonDBReader(object):
         self.random_hue = random_hue
         self.random_rotate = random_rotate
 
+        self.crop_size_zoom = crop_size_zoom
         self.image_size = (1080, 1920)
         self.crop_size = crop_size
 
@@ -120,11 +121,11 @@ class TsimonDBReader(object):
                                   lambda: tf.constant(200.0))
             crop_size_best.set_shape([])
             data_dict['head_size'] = crop_size_best
-            crop_size_best *= 2.0
+            crop_size_best *= self.crop_size_zoom
 
             crop_scale_noise = tf.constant(1.0)
             if self.crop_scale_noise:
-                crop_scale_noise = tf.squeeze(tf.random_uniform([1], minval=0.8, maxval=1.2)) 
+                crop_scale_noise = tf.squeeze(tf.exp(tf.truncated_normal([1], mean=0.0, stddev=0.05)))
             crop_size_best *= crop_scale_noise
 
             # calculate necessary scaling

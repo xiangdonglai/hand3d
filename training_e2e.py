@@ -23,6 +23,7 @@ import sys
 
 from nets.E2ENet import E2ENet
 from data.BinaryDbReaderSTB import BinaryDbReaderSTB
+from data.BinaryDbReader import BinaryDbReader
 from data.DomeReader import DomeReader
 from utils.general import LearningRateScheduler
 from utils.multigpu import average_gradients
@@ -46,14 +47,14 @@ def visualize(heatmap_3d, image_crop):
 
 num_gpu = sum([_.device_type == 'GPU' for _ in device_lib.list_local_devices()])
 fine_tune = True
-already_trained = 7000
+already_trained = 13000
 train_para = {'lr': [1e-5, 1e-6],
-              'lr_iter': [int(100000/num_gpu)],
-              'max_iter': int(200000/num_gpu),
+              'lr_iter': [int(40000/num_gpu)],
+              'max_iter': int(80000/num_gpu),
               'show_loss_freq': 100,
               'snapshot_freq': int(2000/num_gpu),
-              'snapshot_dir': 'snapshots_e2e',
-              'loss_weight_2d': 10.0,
+              'snapshot_dir': 'snapshots_e2e_RHD_STB_nw',
+              'loss_weight_2d': 100.0,
               'model_2d': 'snapshots_cpm_rotate_s10_wrist_vgg/model-60000.pickle'
               }
 
@@ -62,12 +63,16 @@ lifting_dict = {'method': 'direct'}
 
 with tf.Graph().as_default(), tf.device('/cpu:0'):
     # get dataset
-    dataset = DomeReader(mode='training', flip_2d=True, applyDistort=True,
-                             batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=True, crop_size=368, sigma=10.0,
-                             crop_size_zoom=2.0, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False)
+    # dataset = DomeReader(mode='training', flip_2d=True, applyDistort=True,
+    #                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=True, crop_size=368, sigma=10.0,
+    #                          crop_size_zoom=2.0, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False)
+    dataset = BinaryDbReaderSTB(mode='training', batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size=368, sigma=10.0, crop_size_zoom=2.0, crop_center_noise=True, 
+        crop_offset_noise=True, crop_scale_noise=True)
+    # dataset = BinaryDbReader(mode='training', batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size=368, sigma=10.0, crop_size_zoom=2.0, crop_center_noise=True, 
+    #    crop_offset_noise=True, crop_scale_noise=True)
 
     # build network graph
-    data = dataset.get(read_image=True, extra=True)
+    data = dataset.get(extra=True)
 
     for k, v in data.items():
         data[k] = tf.split(v, num_gpu, 0)
@@ -160,7 +165,9 @@ with tf.Graph().as_default(), tf.device('/cpu:0'):
                                           sess.graph)
     if not fine_tune:
         start_iter = 0
-        net.init(sess, weight_files=[train_para['model_2d']])
+        net.init(sess, weight_files=['snapshots_e2e_RHD_nw/model-100000.pickle'])
+        # net.init(sess, weight_files=[train_para['model_2d']])
+        # net.init(sess, cpm_init_vgg=True)
     else:
         saver.restore(sess, PATH_TO_SNAPSHOTS)
         start_iter = already_trained + 1

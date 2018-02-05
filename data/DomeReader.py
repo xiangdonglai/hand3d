@@ -215,7 +215,7 @@ class DomeReader(object):
 
             crop_scale_noise = tf.constant(1.0)
             if self.crop_scale_noise:
-                crop_scale_noise = tf.squeeze(tf.random_uniform([1], minval=0.8, maxval=1.2))    
+                crop_scale_noise = tf.squeeze(tf.exp(tf.truncated_normal([1], mean=0.0, stddev=0.1)))
 
             kp_coord_hw = tf.stack([keypoint_uv21[:, 1], keypoint_uv21[:, 0]], 1)
             # determine size of crop (measure spatial extend of hw coords first)
@@ -362,7 +362,7 @@ if __name__ == '__main__':
                              crop_size_zoom=2.0, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False)
 
     data = d.get(read_image=True)
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
     sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
     sess.run(tf.global_variables_initializer())
     tf.train.start_queue_runners(sess=sess)

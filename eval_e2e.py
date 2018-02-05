@@ -40,14 +40,14 @@ args = parser.parse_args()
 
 # get dataset
 # dataset = BinaryDbReader(mode='evaluation', shuffle=False, use_wrist_coord=False)
-# dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, use_wrist_coord=False, hand_crop=True)
+# dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, use_wrist_coord=True, hand_crop=True, crop_size_zoom=2.0, crop_size=368)
 dataset = DomeReader(mode='evaluation', shuffle=False, use_wrist_coord=True, hand_crop=True, crop_size=368, crop_size_zoom=2.0, flip_2d=True, a2=False, applyDistort=True)
 
 # build network graph
 data = dataset.get()
 image_crop = data['image_crop']
-# lifting_dict = {'method': 'direct'}
 lifting_dict = {'method': 'heatmap'}
+# lifting_dict = {'method': 'direct'}
 # build network
 net = E2ENet(lifting_dict, out_chan=22, crop_size=368)
 
@@ -63,8 +63,8 @@ sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
-# cpt = 'snapshots_e2e/model-7000'
-cpt = 'snapshots_e2e_heatmap/model-10000'
+cpt = 'snapshots_e2e_heatmap/model-67000'
+# cpt = 'snapshots_e2e_a4-stb/model-40000'
 load_weights_from_snapshot(sess, cpt, discard_list=['Adam', 'global_step', 'beta'])
 
 util = EvalUtil()
@@ -101,6 +101,12 @@ for i in range(dataset.num_samples):
     # center gt
     keypoint_xyz21 -= keypoint_xyz21[0, :]
 
+    if type(dataset) == BinaryDbReaderSTB and dataset.use_wrist_coord:
+        coord3d_pred_v[0, :] = 0.5*(coord3d_pred_v[0, :] + coord3d_pred_v[12, :])
+        coord3d_pred_v -= coord3d_pred_v[0, :]
+        keypoint_xyz21[0, :] = 0.5*(keypoint_xyz21[0, :] + keypoint_xyz21[12, :])
+        keypoint_xyz21 -= keypoint_xyz21[0, :]
+
     util.feed(keypoint_xyz21, keypoint_vis21, coord3d_pred_v)
 
     if (i % 100) == 0:
@@ -128,23 +134,24 @@ for i in range(dataset.num_samples):
 
     if args.save:
         fig = plt.figure(figsize=(12, 6))
-        keypoints2d = detect_keypoints(keypoints_scoremap_v)
-        coord_hw = trafo_coords(keypoints2d, center_v, scale_v, 256)
-        coord_uv21 = keypoint_uv21_v[:, ::-1]/2
-        ax1 = fig.add_subplot(121)
-        plt.imshow(image_scaled_v)
-        plot_hand(coord_hw, ax1, color_fixed=np.array((0., 0., 1.0)))
-        plot_hand(coord_uv21, ax1, color_fixed=np.array((1., 0., 0.0)))
+        
+        fig = plt.figure(1)
+        ax1 = fig.add_subplot(121, projection='3d')
+        plot_hand_3d(coord3d_pred_v, ax1, color_fixed=np.array([0.0, 0.0, 1.0]))
+        plot_hand_3d(keypoint_xyz21, ax1, color_fixed=np.array([1.0, 0.0, 0.0]))
+        ax1.view_init(azim=-90.0, elev=-90.0)  # aligns the 3d coord with the camera view
+        plt.xlabel('x')
+        plt.ylabel('y')
+        ax1.set_xlim(-0.1, 0.1)
+        ax1.set_ylim(-0.1, 0.1)
+        ax1.set_zlim(-0.1, 0.1)
+        ax1.view_init(azim=-90.0, elev=-65.0)  # aligns the 3d coord with the camera view
 
-        ax2 = fig.add_subplot(122, projection='3d')
-        plot_hand_3d(coord3d_pred_v, ax2, color_fixed=np.array([0.0, 0.0, 1.0]))
-        plot_hand_3d(keypoint_xyz21, ax2, color_fixed=np.array([1.0, 0.0, 0.0]))
-        ax2.set_xlabel('x')
-        ax2.set_ylabel('y')
-        ax2.set_xlim(-0.1, 0.1)
-        ax2.set_ylim(-0.1, 0.1)
-        ax2.set_zlim(-0.1, 0.1)
-        ax2.view_init(azim=-90.0, elev=-65.0)  # aligns the 3d coord with the camera view
+        ax2 = fig.add_subplot(122)
+        plt.imshow(image_crop_v)
+        plot_hand(coord2d_v, ax2, color_fixed=np.array([0.0, 0.0, 1.0]))
+        plot_hand(keypoint_uv21[:, ::-1], ax2, color_fixed=np.array([1.0, 0.0, 0.0]))
+
         plt.tight_layout()
         # plt.show()
 
@@ -157,7 +164,7 @@ for i in range(dataset.num_samples):
 
         # plt.imshow(figure)
         # plt.show()
-        cv2.imwrite('../results/{0:04d}.jpg'.format(i), figure)
+        cv2.imwrite('../dome_results_lr1e-5/{0:04d}.jpg'.format(i), figure)
 
 # Output results
 mean, median, auc, pck_curve_all, threshs = util.get_measures(0.0, 0.050, 20)  # rainier: Should lead to 0.764 / 9.405 / 12.210

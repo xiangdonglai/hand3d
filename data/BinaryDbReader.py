@@ -29,7 +29,7 @@ class BinaryDbReader(object):
     """
         Reads data from a binary dataset created by create_binary_db.py
     """
-    def __init__(self, mode=None, batch_size=1, shuffle=True, use_wrist_coord=True, sigma=25.0, hand_crop=False,
+    def __init__(self, mode=None, batch_size=1, shuffle=True, use_wrist_coord=True, sigma=25.0, hand_crop=False, crop_size=256, crop_size_zoom=1.25, exrta=False, flip_2d=False,
                  random_crop_to_size=False,
                  scale_to_size=False,
                  hue_aug=False,
@@ -95,10 +95,12 @@ class BinaryDbReader(object):
 
         # these are constants of the dataset and therefore must not be changed
         self.image_size = (320, 320)
-        self.crop_size = 256
+        self.crop_size = crop_size
+        self.crop_size_zoom = crop_size_zoom
         self.num_kp = 42
+        self.flip_2d = flip_2d
 
-    def get(self):
+    def get(self, extra=False):
         """ Provides input data to the graph. """
         # calculate size of each record (this lists what is contained in the db and how many bytes are occupied)
         record_bytes = 2
@@ -232,6 +234,8 @@ class BinaryDbReader(object):
                              tf.constant(1, dtype=tf.int32))  # left hand = 0; right hand = 1
         data_dict['hand_side'] = tf.one_hot(hand_side, depth=2, on_value=1.0, off_value=0.0, dtype=tf.float32)
 
+        if self.flip_2d:
+            kp_coord_xyz21 = tf.cond(hand_side, lambda: tf.concat([tf.expand_dims(-kp_coord_xyz21[:, 0], axis=1), kp_coord_xyz21[:, 1:]], axis=1), lambda: kp_coord_xyz21)
         data_dict['keypoint_xyz21'] = kp_coord_xyz21
 
         # make coords relative to root joint
@@ -252,7 +256,8 @@ class BinaryDbReader(object):
         # calculate viewpoint and coords in canonical coordinates
         kp_coord_xyz21_rel_can, rot_mat = canonical_trafo(data_dict['keypoint_xyz21_normed'])
         kp_coord_xyz21_rel_can, rot_mat = tf.squeeze(kp_coord_xyz21_rel_can), tf.squeeze(rot_mat)
-        kp_coord_xyz21_rel_can = flip_right_hand(kp_coord_xyz21_rel_can, tf.logical_not(cond_left))
+        if not self.flip_2d:
+            kp_coord_xyz21_rel_can = flip_right_hand(kp_coord_xyz21_rel_can, tf.logical_not(cond_left))
         data_dict['keypoint_xyz21_can'] = kp_coord_xyz21_rel_can
         data_dict['rot_mat'] = tf.matrix_inverse(rot_mat)
 
@@ -283,7 +288,8 @@ class BinaryDbReader(object):
 
             crop_scale_noise = tf.constant(1.0)
             if self.crop_scale_noise:
-                    crop_scale_noise = tf.squeeze(tf.random_uniform([1], minval=1.0, maxval=1.2))
+                # crop_scale_noise = tf.squeeze(tf.random_uniform([1], minval=1.0, maxval=1.2))
+                crop_scale_noise = tf.squeeze(tf.exp(tf.truncated_normal([1], mean=0.0, stddev=0.05)))
 
             # select visible coords only
             kp_coord_h = tf.boolean_mask(keypoint_uv21[:, 1], keypoint_vis21)
@@ -303,12 +309,13 @@ class BinaryDbReader(object):
             crop_size_best = tf.cond(tf.reduce_all(tf.is_finite(crop_size_best)), lambda: crop_size_best,
                                   lambda: tf.constant(200.0))
             crop_size_best.set_shape([])
-            crop_size_best *= 1.25
+            crop_size_best *= self.crop_size_zoom
+            crop_size_best *= crop_scale_noise
 
             # calculate necessary scaling
             scale = tf.cast(self.crop_size, tf.float32) / crop_size_best
-            scale = tf.minimum(tf.maximum(scale, 1.0), 10.0)
-            scale *= crop_scale_noise
+            # scale = tf.minimum(tf.maximum(scale, 1.0), 10.0)
+            # scale *= crop_scale_noise
             data_dict['crop_scale'] = scale
 
             if self.crop_offset_noise:
@@ -317,11 +324,18 @@ class BinaryDbReader(object):
 
             # Crop image
             img_crop = crop_image_from_xy(tf.expand_dims(image, 0), crop_center, self.crop_size, scale)
+            if self.flip_2d:
+                img_crop = tf.cond(hand_side, lambda: img_crop[:, ::-1, :], lambda: img_crop)
             data_dict['image_crop'] = tf.squeeze(img_crop)
 
             # Modify uv21 coordinates
             crop_center_float = tf.cast(crop_center, tf.float32)
-            keypoint_uv21_u = (keypoint_uv21[:, 0] - crop_center_float[1]) * scale + self.crop_size // 2
+            if self.flip_2d:
+                keypoint_uv21_u = tf.cond(hand_side,
+                    lambda: -(keypoint_uv21[:, 0] - crop_center_float[1]) * scale + self.crop_size // 2,
+                    lambda: (keypoint_uv21[:, 0] - crop_center_float[1]) * scale + self.crop_size // 2)
+            else:
+                keypoint_uv21_u = (keypoint_uv21[:, 0] - crop_center_float[1]) * scale + self.crop_size // 2
             keypoint_uv21_v = (keypoint_uv21[:, 1] - crop_center_float[0]) * scale + self.crop_size // 2
             keypoint_uv21 = tf.stack([keypoint_uv21_u, keypoint_uv21_v], 1)
             data_dict['keypoint_uv21'] = keypoint_uv21
@@ -361,7 +375,7 @@ class BinaryDbReader(object):
         scoremap = self.create_multiple_gaussian_map(keypoint_hw21,
                                                      scoremap_size,
                                                      self.sigma,
-                                                     valid_vec=keypoint_vis21)
+                                                     valid_vec=keypoint_vis21, extra=extra)
         
         if self.scoremap_dropout:
             scoremap = tf.nn.dropout(scoremap, self.scoremap_dropout_prob,
@@ -370,7 +384,7 @@ class BinaryDbReader(object):
 
         data_dict['scoremap'] = scoremap
 
-        data_dict['scoremap_3d'], data_dict['scaled_center'] = create_multiple_gaussian_map_3d(data_dict['keypoint_xyz21_normed'], 32, 5)
+        data_dict['scoremap_3d'] = create_multiple_gaussian_map_3d(data_dict['keypoint_xyz21_normed'], int(self.crop_size/8), 3, extra=extra)
 
         if self.scale_to_size:
             image, keypoint_uv21, keypoint_vis21 = data_dict['image'], data_dict['keypoint_uv21'], data_dict['keypoint_vis21']
@@ -416,7 +430,7 @@ class BinaryDbReader(object):
 
 
     @staticmethod
-    def create_multiple_gaussian_map(coords_uv, output_size, sigma, valid_vec=None):
+    def create_multiple_gaussian_map(coords_uv, output_size, sigma, valid_vec=None, extra=False):
         """ Creates a map of size (output_shape[0], output_shape[1]) at (center[0], center[1])
             with variance sigma for multiple coordinates."""
         with tf.name_scope('create_multiple_gaussian_map'):
@@ -462,35 +476,56 @@ class BinaryDbReader(object):
 
             scoremap = tf.exp(-dist / tf.square(sigma)) * tf.cast(cond, tf.float32)
 
+            if extra:
+                negative = 1 - tf.reduce_sum(scoremap, axis=2, keep_dims=True)
+                negative = tf.minimum(tf.maximum(negative, 0.0), 1.0)
+                scoremap = tf.concat([scoremap, negative], axis=2)
+
             return scoremap
 
 
 if __name__ == '__main__':
     import numpy as np
     d = BinaryDbReader(mode='training',
-                         batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False,
-                         coord_uv_noise=True, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
-    data = d.get()
+                         batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size=368, crop_size_zoom=2.0,
+                         coord_uv_noise=False, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
+    data = d.get(extra=True)
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
     sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
     sess.run(tf.global_variables_initializer())
     tf.train.start_queue_runners(sess=sess)
 
-    from utils.general import detect_keypoints_3d, plot_hand_3d
+    from utils.general import detect_keypoints_3d, plot_hand_3d, plot_hand
     import matplotlib.pyplot as plt
     from mpl_toolkits.mplot3d import Axes3D
 
     for i in range(10):
-
-        scoremap_3d, keypoint_xyz21_normed = sess.run([data['scoremap_3d'], data['keypoint_xyz21_normed']])
+        image_crop, scoremap_3d, keypoint_xyz21_normed, keypoint_uv21 = sess.run([data['image_crop'], data['scoremap_3d'], data['keypoint_xyz21_normed'], data['keypoint_uv21']])
         scoremap_3d = np.squeeze(scoremap_3d)
         keypoint_xyz21_normed = np.squeeze(keypoint_xyz21_normed)
+        image_crop = np.squeeze(image_crop)
+        image_crop = ((image_crop+0.5)*255).astype(np.uint8)
+        keypoint_uv21 = np.squeeze(keypoint_uv21)
 
-        keypoints = detect_keypoints_3d(scoremap_3d)
+        keypoints = detect_keypoints_3d(scoremap_3d).astype(np.float32)
 
         fig = plt.figure()
-        ax = fig.add_subplot(121, projection='3d')
+        ax = fig.add_subplot(131, projection='3d')
+        ax.set_xlim(0, 46)
+        ax.set_ylim(0, 46)
+        ax.set_zlim(0, 46)
         plot_hand_3d(keypoints, ax)
-        ax = fig.add_subplot(122, projection='3d')
+        ax.invert_yaxis()
+        ax.invert_zaxis()
+        plt.xlabel('x')
+        plt.ylabel('y')
+
+        ax = fig.add_subplot(132, projection='3d')
         plot_hand_3d(keypoint_xyz21_normed, ax)
+        ax.invert_yaxis()
+        ax.invert_zaxis()
+
+        ax = fig.add_subplot(133)
+        ax.imshow(image_crop)
+        plot_hand(keypoint_uv21[:, ::-1], ax)
         plt.show()

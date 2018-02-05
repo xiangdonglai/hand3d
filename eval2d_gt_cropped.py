@@ -42,12 +42,12 @@ parser.add_argument('--save', '-s', action='store_true')
 args = parser.parse_args()
 
 # flag that allows to load a retrained snapshot(original weights used in the paper are used otherwise)
-USE_RETRAINED = False
+USE_RETRAINED = True
 FREIBURG_ORDER = True
-PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_s10_wrist_dome/'  # only used when USE_RETRAINED is true
+PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_s10_wrist_scale16_dome-tsimon/'  # only used when USE_RETRAINED is true
 
 # get dataset
-dataset = ManualDBReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=True, crop_size=368)
+dataset = ManualDBReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=True, crop_size=368, crop_size_zoom=2.0)
 
 # build network graph
 data = dataset.get(read_image=True)
@@ -80,7 +80,7 @@ if USE_RETRAINED:
 else:
     # load weights used in the paper
     # net.init('./weights/pose_model.npy', sess)
-    net.init_pickle(sess, ['./snapshots_cpm_rotate_s10_wrist_dome/model-40000.pickle'], ['scale'])
+    net.init_pickle(sess, ['./snapshots_cpm_rotate_s10_wrist_dome/model-100000.pickle'], ['scale'])
 
 util = EvalUtil()
 # iterate dataset
@@ -155,5 +155,5 @@ plt.show()
 
 if args.save:
     import json
-    with open('./eval/detection_2d.json'.format(last_cpt), 'w') as f:
+    with open('./eval/detection_2d.json', 'w') as f:
         json.dump(results, f)

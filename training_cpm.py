@@ -39,17 +39,17 @@ train_para = {'lr': [1e-4, 1e-5, 1e-6],
               'max_iter': int(200000/num_gpu),
               'show_loss_freq': 100,
               'snapshot_freq': int(5000/num_gpu),
-              'snapshot_dir': 'snapshots_cpm_rotate_s10_wrist_dome'}
+              'snapshot_dir': 'snapshots_cpm_rotate_s10_wrist_dome_simon'}
 
 with tf.Graph().as_default(), tf.device('/cpu:0'):
     # get dataset
     datasets = [
         TsimonDBReader(mode='training',
-                             batch_size=4*num_gpu, shuffle=True, use_wrist_coord=True, crop_size=368, sigma=10.0, random_rotate=True, random_hue=False,
-                             hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True),
-        DomeReader(mode='training', flip_2d=True, applyDistort=True,
-                             batch_size=4*num_gpu, shuffle=True, use_wrist_coord=True, crop_size=368, sigma=10.0, crop_size_zoom=2.0,
-                             hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True, a4=True, a2=True)
+                             batch_size=4*num_gpu, shuffle=True, use_wrist_coord=True, crop_size=368, sigma=10.0, random_rotate=True, random_hue=False, crop_size_zoom=2.0,
+                             hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True)
+        # DomeReader(mode='training', flip_2d=True, applyDistort=True,
+        #                      batch_size=4*num_gpu, shuffle=True, use_wrist_coord=True, crop_size=368, sigma=10.0, crop_size_zoom=2.0,
+        #                      hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True, a4=True, a2=True)
     ]
     dataset = MultiDataset(datasets)
 
@@ -101,14 +101,14 @@ with tf.Graph().as_default(), tf.device('/cpu:0'):
     apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
 
     # Start TF
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.6)
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
     sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
     sess.run(tf.global_variables_initializer())
     tf.train.start_queue_runners(sess=sess)
 
     # init weights
     sess.run(tf.global_variables_initializer())
-    saver = tf.train.Saver()
+    saver = tf.train.Saver(max_to_keep=None)
 
     # snapshot dir
     if not os.path.exists(train_para['snapshot_dir']):
@@ -121,7 +121,7 @@ with tf.Graph().as_default(), tf.device('/cpu:0'):
 
     if not fine_tune:
         start_iter = 0
-        net.init_pickle(sess, ['./snapshots_cpm_rotate_s10_wrist_vgg/model-30000.pickle'])
+        net.init_pickle(sess, ['./snapshots_cpm_rotate_s10_wrist_dome/model-100000.pickle'])
         # net.init_vgg(sess)
     else:
         saver.restore(sess, PATH_TO_SNAPSHOTS)

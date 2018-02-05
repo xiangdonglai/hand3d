@@ -9,7 +9,7 @@ import os
 
 class ManualDBReader(object):
 
-    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False,
+    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, crop_size_zoom=2.0,
         coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False, mpii=True, nzsl=True, crop_size=256):
 
         self.batch_size = batch_size
@@ -25,6 +25,7 @@ class ManualDBReader(object):
         self.crop_offset_noise = crop_offset_noise
         self.crop_offset_noise_sigma = 10.0  # translates the crop after size calculation (this can move keypoints outside)
         self.crop_scale_noise = crop_scale_noise
+        self.crop_size_zoom = crop_size_zoom
 
         assert mpii or nzsl
 
@@ -122,7 +123,7 @@ class ManualDBReader(object):
             crop_size_best = tf.cond(tf.reduce_all(tf.is_finite(crop_size_best)), lambda: crop_size_best,
                                   lambda: tf.constant(200.0))
             crop_size_best.set_shape([])
-            crop_size_best *= 2
+            crop_size_best *= self.crop_size_zoom
             crop_size_best *= crop_scale_noise
 
             # calculate necessary scaling

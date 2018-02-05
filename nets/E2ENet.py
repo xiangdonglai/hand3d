@@ -14,7 +14,7 @@ class E2ENet(object):
         self.lifting_dict = lifting_dict
         assert lifting_dict['method'] in ['direct', 'heatmap']
 
-    def init(self, session, weight_files=None, exclude_var_list=None):
+    def init(self, session, weight_files=None, exclude_var_list=None, cpm_init_vgg=False):
         """ Initializes weights from pickled python dictionaries.
 
             Inputs:
@@ -26,18 +26,21 @@ class E2ENet(object):
             exclude_var_list = list()
 
         import pickle
-        assert weight_files is not None
 
-        # Initialize with weights
-        for file_name in weight_files:
-            assert os.path.exists(file_name), "File not found."
-            with open(file_name, 'rb') as fi:
-                weight_dict = pickle.load(fi)
-                weight_dict = {k: v for k, v in weight_dict.items() if not any([x in k for x in exclude_var_list])}
-                if len(weight_dict) > 0:
-                    init_op, init_feed = tf.contrib.framework.assign_from_values(weight_dict)
-                    session.run(init_op, init_feed)
-                    print('Loaded %d variables from %s' % (len(weight_dict), file_name))
+        if cpm_init_vgg:
+            self.cpm.init_vgg(session)
+
+        if weight_files is not None:
+            # Initialize with weights
+            for file_name in weight_files:
+                assert os.path.exists(file_name), "File not found."
+                with open(file_name, 'rb') as fi:
+                    weight_dict = pickle.load(fi)
+                    weight_dict = {k: v for k, v in weight_dict.items() if not any([x in k for x in exclude_var_list])}
+                    if len(weight_dict) > 0:
+                        init_op, init_feed = tf.contrib.framework.assign_from_values(weight_dict)
+                        session.run(init_op, init_feed)
+                        print('Loaded %d variables from %s' % (len(weight_dict), file_name))
 
     def inference(self, input_image, evaluation, train=False):
         heatmap_2d, encoding = self.cpm.inference(input_image, train)
