@@ -47,26 +47,26 @@ def visualize(heatmap_3d, image_crop):
 
 num_gpu = sum([_.device_type == 'GPU' for _ in device_lib.list_local_devices()])
 fine_tune = True
-already_trained = 13000
-train_para = {'lr': [1e-5, 1e-6],
+already_trained = 11000
+train_para = {'lr': [1e-4, 1e-5],
               'lr_iter': [int(40000/num_gpu)],
               'max_iter': int(80000/num_gpu),
               'show_loss_freq': 100,
               'snapshot_freq': int(2000/num_gpu),
-              'snapshot_dir': 'snapshots_e2e_RHD_STB_nw',
-              'loss_weight_2d': 100.0,
+              'snapshot_dir': 'snapshots_e2e_a4-STB_heatmap',
+              'loss_weight_2d': 10.0,
               'model_2d': 'snapshots_cpm_rotate_s10_wrist_vgg/model-60000.pickle'
               }
 
 PATH_TO_SNAPSHOTS = './{}/model-{}'.format(train_para['snapshot_dir'], already_trained)  # only used when USE_RETRAINED is true
-lifting_dict = {'method': 'direct'}
+lifting_dict = {'method': 'heatmap'}
 
 with tf.Graph().as_default(), tf.device('/cpu:0'):
     # get dataset
     # dataset = DomeReader(mode='training', flip_2d=True, applyDistort=True,
     #                          batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=True, crop_size=368, sigma=10.0,
     #                          crop_size_zoom=2.0, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False)
-    dataset = BinaryDbReaderSTB(mode='training', batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size=368, sigma=10.0, crop_size_zoom=2.0, crop_center_noise=True, 
+    dataset = BinaryDbReaderSTB(mode='training', batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=True, crop_size=368, sigma=10.0, crop_size_zoom=2.0, crop_center_noise=True, 
         crop_offset_noise=True, crop_scale_noise=True)
     # dataset = BinaryDbReader(mode='training', batch_size=8, shuffle=True, hand_crop=True, use_wrist_coord=False, crop_size=368, sigma=10.0, crop_size_zoom=2.0, crop_center_noise=True, 
     #    crop_offset_noise=True, crop_scale_noise=True)
@@ -165,7 +165,7 @@ with tf.Graph().as_default(), tf.device('/cpu:0'):
                                           sess.graph)
     if not fine_tune:
         start_iter = 0
-        net.init(sess, weight_files=['snapshots_e2e_RHD_nw/model-100000.pickle'])
+        net.init(sess, weight_files=['snapshots_e2e_heatmap/model-75000.pickle'])
         # net.init(sess, weight_files=[train_para['model_2d']])
         # net.init(sess, cpm_init_vgg=True)
     else:

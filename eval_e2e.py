@@ -40,7 +40,7 @@ args = parser.parse_args()
 
 # get dataset
 # dataset = BinaryDbReader(mode='evaluation', shuffle=False, use_wrist_coord=False)
-# dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, use_wrist_coord=True, hand_crop=True, crop_size_zoom=2.0, crop_size=368)
+# dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, use_wrist_coord=False, hand_crop=True, crop_size_zoom=2.0, crop_size=368)
 dataset = DomeReader(mode='evaluation', shuffle=False, use_wrist_coord=True, hand_crop=True, crop_size=368, crop_size_zoom=2.0, flip_2d=True, a2=False, applyDistort=True)
 
 # build network graph
@@ -63,8 +63,9 @@ sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
-cpt = 'snapshots_e2e_heatmap/model-67000'
-# cpt = 'snapshots_e2e_a4-stb/model-40000'
+# cpt = 'snapshots_e2e_a4-stb/model-39000'
+# cpt = 'snapshots_e2e_RHD_STB_nw/model-38000'
+cpt = 'snapshots_e2e_heatmap/model-100000'
 load_weights_from_snapshot(sess, cpt, discard_list=['Adam', 'global_step', 'beta'])
 
 util = EvalUtil()
@@ -102,9 +103,9 @@ for i in range(dataset.num_samples):
     keypoint_xyz21 -= keypoint_xyz21[0, :]
 
     if type(dataset) == BinaryDbReaderSTB and dataset.use_wrist_coord:
-        coord3d_pred_v[0, :] = 0.5*(coord3d_pred_v[0, :] + coord3d_pred_v[12, :])
+        coord3d_pred_v[0, :] = 0.5*(coord3d_pred_v[0, :] + coord3d_pred_v[16, :])
         coord3d_pred_v -= coord3d_pred_v[0, :]
-        keypoint_xyz21[0, :] = 0.5*(keypoint_xyz21[0, :] + keypoint_xyz21[12, :])
+        keypoint_xyz21[0, :] = 0.5*(keypoint_xyz21[0, :] + keypoint_xyz21[16, :])
         keypoint_xyz21 -= keypoint_xyz21[0, :]
 
     util.feed(keypoint_xyz21, keypoint_vis21, coord3d_pred_v)
