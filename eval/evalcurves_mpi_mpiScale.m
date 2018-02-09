@@ -34,13 +34,10 @@ drange = linspace(0,1,250);
 
 % Models to evaluate
 models = {
-    'hands_v12_reno_noscale_32k',
-    'hands_v123_noft_120k',
-    'hands_v13_pure_30k',
-    'hands_v133_noft_122k',
-    'hands_v14_mix_50k',
     'hands_v143_noft_102k',
-    'CPM'};
+    'my_measure',
+    'CPM',
+    'snapshots_cpm_rotate_s10_wrist_dome_simon'};
 
 close all;
 clear results;
@@ -56,7 +53,7 @@ for idm = 1:length(models)
     test_files = {};
     warning off;
     % in_path = sprintf('/media/posefs3b/Users/tsimon/outputs/hands/%s/%s/mat/', seq_name, model_name);
-    if idm <= 6
+    if idm <= 1
         in_path = sprintf('/media/posefs3b/Users/tsimon/outputs/hands/%s/%s/mat/', seq_name, model_name);
     else
         in_path = sprintf('./%s/%s/mat/', seq_name, model_name);
@@ -249,14 +246,16 @@ set(gcf, 'Color', 'w');
 
 drange = linspace(0,1,250);
 % sel_results = [2, 4, 5, 8, 10, 14];
-sel_results = 1:7;
-texts = {'Render (initial)', 'Render (iteration 2)', 'Manual (initial)', 'Manual (iteration 2)', 'Mix (initial)', 'Mix (iteration 3)', 'CPM'};
-styles = {':', '-', ':', '-', ':', '-', ':','-',':'}; 
-cols =[    0.8941    0.1020    0.1098
-    0.3020    0.6863    0.2902
-    0.2157    0.4941    0.7216
-    ];
-cols = kron(cols, [0.85; 1]);
+sel_results = 1:4;
+% texts = {'Render (initial)', 'Render (iteration 2)', 'Manual (initial)', 'Manual (iteration 2)', 'Mix (initial)', 'Mix (iteration 3)', 'CPM'};
+texts = {'Tomas reported', 'My measured', 'My trained', 'My trained (with dome data)'};
+% styles = {':', '-', ':', '-', ':', '-', ':','-',':'}; 
+styles = {':', '-', ':', '-'};
+% cols =[    0.8941    0.1020    0.1098
+%     0.3020    0.6863    0.2902
+%     0.2157    0.4941    0.7216
+%     ];
+% cols = kron(cols, [0.85; 1]);
 for idri=1:length(sel_results)
     idr =sel_results(idri);
     result = results(idr);
@@ -274,6 +273,7 @@ for idri=1:length(sel_results)
             pck(k,jidx) = pck(k,jidx) + mean(d(~isnan(d))<=drange(k));
         end
     end
+    disp(mean(mean(pck)));
 %     result.pck = pck;
 %     results(idr) = result; 
     % plot(drange, mean(pck(:,:),2), 'Color', cols(idri, :), 'LineWidth', 2, 'LineStyle', styles{idri}); 

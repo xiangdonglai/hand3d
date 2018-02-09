@@ -1,5 +1,5 @@
 clear;
-seq_name = 'hand_mpi_nzl_v20_orig_ts';
+seq_name = 'my_measure';
 model_name = 'CPM';
 target_dir = fullfile(seq_name, model_name, 'mat');
 if ~exist(target_dir, 'dir')

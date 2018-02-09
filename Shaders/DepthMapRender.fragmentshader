@@ -1,0 +1,16 @@
+#version 330
+
+in vec3 color;
+in float depthValue;
+
+//out vec4 fragColor;
+//layout(location = 0) out vec3 fragColor;
+layout(location = 0) out float depth;
+
+void main()
+{
+    //fragColor = color;	
+	depth = gl_FragCoord.z;
+
+	//depth = 2.0;//depthValue;
+}

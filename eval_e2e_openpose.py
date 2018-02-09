@@ -23,31 +23,27 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-import argparse, cv2
+import argparse, cv2, os
 import pdb
 
-from data.BinaryDbReader import *
-from data.BinaryDbReaderSTB import *
-from data.DomeReader import DomeReader
+from data.OpenposeReader import OpenposeReader
 from nets.E2ENet import E2ENet
-from nets.CPM import CPM
 from utils.general import EvalUtil, get_stb_ref_curves, calc_auc, plot_hand_3d, detect_keypoints, trafo_coords, plot_hand, detect_keypoints_3d, hand_size, load_weights_from_snapshot
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--visualize', '-v', action='store_true')
 parser.add_argument('--save', '-s', action='store_true')
+parser.add_argument('--output_dir', '-o', type=str, default='/home/donglaix/Documents/Experiments/output_3d_heatmap1')
 args = parser.parse_args()
 
 # get dataset
-# dataset = BinaryDbReader(mode='evaluation', shuffle=False, use_wrist_coord=False)
-dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, use_wrist_coord=False, hand_crop=True, crop_size_zoom=2.0, crop_size=368)
-# dataset = DomeReader(mode='evaluation', shuffle=False, use_wrist_coord=True, hand_crop=True, crop_size=368, crop_size_zoom=2.0, flip_2d=True, a2=False, applyDistort=True)
+dataset = OpenposeReader(mode='evaluation', shuffle=False, use_wrist_coord=True, hand_crop=True, crop_size=368, crop_size_zoom=2.0, flip_2d=True)
 
 # build network graph
 data = dataset.get()
 image_crop = data['image_crop']
-# lifting_dict = {'method': 'heatmap'}
-lifting_dict = {'method': 'direct'}
+lifting_dict = {'method': 'heatmap'}
+
 # build network
 net = E2ENet(lifting_dict, out_chan=22, crop_size=368)
 
@@ -63,25 +59,23 @@ sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
-# cpt = 'snapshots_e2e_a4-stb/model-39000'
-cpt = 'snapshots_e2e_RHD_STB_nw/model-38000'
-# cpt = 'snapshots_e2e_heatmap/model-100000'
-load_weights_from_snapshot(sess, cpt, discard_list=['Adam', 'global_step', 'beta'])
+# cpt = 'snapshots_e2e/model-100000'
+# cpt = 'snapshots_e2e_RHD_STB_nw/model-38000'
+cpt = 'snapshots_e2e_heatmap/model-100000'
+load_weights_from_snapshot(sess, cpt, discard_list=['Adam', 'global_step', 'beta', 'scale'])
 
 util = EvalUtil()
 # iterate dataset
 for i in range(dataset.num_samples):
     # get prediction
     if lifting_dict['method'] == 'direct':
-        keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21, image_crop_v, coord_xyz_norm, scoremap_v = \
-            sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, rel_dict['coord_xyz_norm'], heatmap_2d])
+        keypoint_vis21, keypoint_uv21, image_crop_v, coord_xyz_norm, scoremap_v, img_dir = \
+            sess.run([data['keypoint_vis21'], data['keypoint_uv21'], data['image_crop'], rel_dict['coord_xyz_norm'], heatmap_2d, data['img_dir']])
     elif lifting_dict['method'] == 'heatmap':
-        keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21, image_crop_v, scoremap_v, scoremap_3d_v = \
-            sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, heatmap_2d, rel_dict['heatmap_3d'][-1]])
+        keypoint_vis21, keypoint_uv21, image_crop_v, scoremap_v, scoremap_3d_v, img_dir = \
+            sess.run([data['keypoint_vis21'], data['keypoint_uv21'], data['image_crop'], heatmap_2d, rel_dict['heatmap_3d'][-1], data['img_dir']])
 
-    keypoint_xyz21 = np.squeeze(keypoint_xyz21)
     keypoint_vis21 = np.squeeze(keypoint_vis21)
-    keypoint_scale = np.squeeze(keypoint_scale)
     keypoint_uv21 = np.squeeze(keypoint_uv21)
     image_crop_v = np.squeeze((image_crop_v+0.5)*255).astype(np.uint8)
     scoremap_v = np.squeeze(scoremap_v)
@@ -98,17 +92,7 @@ for i in range(dataset.num_samples):
 
     coord3d_pred_v -= coord3d_pred_v[0, :]
     # rescale to meters
-    coord3d_pred_v *= keypoint_scale / hand_size(coord3d_pred_v)
-    # center gt
-    keypoint_xyz21 -= keypoint_xyz21[0, :]
-
-    if type(dataset) == BinaryDbReaderSTB and dataset.use_wrist_coord:
-        coord3d_pred_v[0, :] = 0.5*(coord3d_pred_v[0, :] + coord3d_pred_v[16, :])
-        coord3d_pred_v -= coord3d_pred_v[0, :]
-        keypoint_xyz21[0, :] = 0.5*(keypoint_xyz21[0, :] + keypoint_xyz21[16, :])
-        keypoint_xyz21 -= keypoint_xyz21[0, :]
-
-    util.feed(keypoint_xyz21, keypoint_vis21, coord3d_pred_v)
+    coord3d_pred_v /= hand_size(coord3d_pred_v)
 
     if (i % 100) == 0:
         print('%d / %d images done: %.3f percent' % (i, dataset.num_samples, i*100.0/dataset.num_samples))
@@ -117,7 +101,6 @@ for i in range(dataset.num_samples):
             fig = plt.figure(1)
             ax1 = fig.add_subplot(121, projection='3d')
             plot_hand_3d(coord3d_pred_v, ax1, color_fixed=np.array([0.0, 0.0, 1.0]))
-            plot_hand_3d(keypoint_xyz21, ax1, color_fixed=np.array([1.0, 0.0, 0.0]))
             ax1.view_init(azim=-90.0, elev=-90.0)  # aligns the 3d coord with the camera view
             plt.xlabel('x')
             plt.ylabel('y')
@@ -134,64 +117,36 @@ for i in range(dataset.num_samples):
             # pdb.set_trace()
 
     if args.save:
-        fig = plt.figure(figsize=(12, 6))
-        
-        fig = plt.figure(1)
-        ax1 = fig.add_subplot(121, projection='3d')
+        coord3d_pred_v[:, 0] = -coord3d_pred_v[:, 0]
+
+        fig = plt.figure()
+        ax1 = fig.add_subplot(111, projection='3d')
         plot_hand_3d(coord3d_pred_v, ax1, color_fixed=np.array([0.0, 0.0, 1.0]))
-        plot_hand_3d(keypoint_xyz21, ax1, color_fixed=np.array([1.0, 0.0, 0.0]))
-        ax1.view_init(azim=-90.0, elev=-90.0)  # aligns the 3d coord with the camera view
         plt.xlabel('x')
         plt.ylabel('y')
-        ax1.set_xlim(-0.1, 0.1)
-        ax1.set_ylim(-0.1, 0.1)
-        ax1.set_zlim(-0.1, 0.1)
-        ax1.view_init(azim=-90.0, elev=-65.0)  # aligns the 3d coord with the camera view
-
-        ax2 = fig.add_subplot(122)
-        plt.imshow(image_crop_v)
-        plot_hand(coord2d_v, ax2, color_fixed=np.array([0.0, 0.0, 1.0]))
-        plot_hand(keypoint_uv21[:, ::-1], ax2, color_fixed=np.array([1.0, 0.0, 0.0]))
-
-        plt.tight_layout()
+        ax1.view_init(azim=-90.0, elev=-70.0)
+        ax1.set_xlim(-0.2, 0.2)
+        ax1.set_ylim(-0.2, 0.2)
+        ax1.set_zlim(-0.2, 0.2)
+        fig.subplots_adjust(top=1, bottom=0, left=0, right=1)
+        
         # plt.show()
 
         fig.canvas.draw()
         figure = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
         figure = figure.reshape(fig.canvas.get_width_height()[::-1] + (3,))[:, :, ::-1]
 
+        img_dir = img_dir[0].decode().replace('individ_imgs', 'detected_hand1')
+        img = cv2.imread(img_dir)
+        dh = figure.shape[0]
+        dw = int(float(img.shape[1]) / img.shape[0] * dh)
+        resized_img = cv2.resize(img, (dw, dh))
+
+        concat = np.concatenate((resized_img, figure), axis=1)
+        plt.cla()
         plt.clf()
         plt.close()
 
-        # plt.imshow(figure)
-        # plt.show()
-        cv2.imwrite('../dome_results_heatmap/{0:04d}.jpg'.format(i), figure)
-
-# Output results
-mean, median, auc, pck_curve_all, threshs = util.get_measures(0.0, 0.050, 20)  # rainier: Should lead to 0.764 / 9.405 / 12.210
-print('Evaluation results')
-print('Average mean EPE: %.3f mm' % (mean*1000))
-print('Average median EPE: %.3f mm' % (median*1000))
-print('Area under curve between 0mm - 50mm: %.3f' % auc)
-
-# only use subset that lies in 20mm .. 50mm
-pck_curve_all, threshs = pck_curve_all[8:], threshs[8:]*1000.0
-auc_subset = calc_auc(threshs, pck_curve_all)
-print('Area under curve between 20mm - 50mm: %.3f' % auc_subset)
-
-# Show Figure 9 from the paper
-if type(dataset) == BinaryDbReaderSTB:
-
-    import matplotlib.pyplot as plt
-    curve_list = get_stb_ref_curves()
-    curve_list.append((threshs, pck_curve_all, 'Ours (AUC=%.3f)' % auc_subset))
-
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    for t, v, name in curve_list:
-        ax.plot(t, v, label=name)
-    ax.set_xlabel('threshold in mm')
-    ax.set_ylabel('PCK')
-    plt.legend(loc='lower right')
-    plt.savefig('eval_e2e.png')
-    plt.show()
+        basename = os.path.basename(img_dir)
+        output_file = os.path.join(args.output_dir, basename)
+        cv2.imwrite(output_file, concat)

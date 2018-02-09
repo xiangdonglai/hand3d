@@ -42,12 +42,13 @@ parser.add_argument('--save', '-s', action='store_true')
 args = parser.parse_args()
 
 # flag that allows to load a retrained snapshot(original weights used in the paper are used otherwise)
-USE_RETRAINED = True
-FREIBURG_ORDER = True
+USE_RETRAINED = False
+FREIBURG_ORDER = False
 PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_s10_wrist_dome_simon/'  # only used when USE_RETRAINED is true
 
 # get dataset
-dataset = ManualDBReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=True, crop_size=368, crop_size_zoom=2.0)
+# dataset = ManualDBReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=True, crop_size=368, crop_size_zoom=2.0)
+dataset = DomeReader(mode='evaluation', shuffle=False, hand_crop=True, use_wrist_coord=True, crop_size=368, crop_size_zoom=2.0)
 
 # build network graph
 data = dataset.get(read_image=True)
@@ -56,7 +57,7 @@ data = dataset.get(read_image=True)
 # build network
 evaluation = tf.placeholder_with_default(True, shape=())
 net = CPM(crop_size=368, out_chan=22)
-# data['image_crop'] = data['image_crop'][:, :, :, ::-1] # convert to BGR (for tomas model)
+data['image_crop'] = data['image_crop'][:, :, :, ::-1] # convert to BGR (for tomas model)
 keypoints_scoremap, _ = net.inference(data['image_crop'])
 keypoints_scoremap = keypoints_scoremap[-1]
 
@@ -79,8 +80,8 @@ if USE_RETRAINED:
     print('loading weights from {}'.format(last_cpt))
 else:
     # load weights used in the paper
-    # net.init('./weights/pose_model.npy', sess)
-    net.init_pickle(sess, ['./snapshots_cpm_rotate_s10_wrist_dome/model-100000.pickle'], ['scale'])
+    net.init('./weights/pose_model.npy', sess)
+    # net.init_pickle(sess, ['./snapshots_cpm_rotate_s10_wrist_dome/model-100000.pickle'], ['scale'])
 
 util = EvalUtil()
 # iterate dataset
@@ -88,10 +89,10 @@ util = EvalUtil()
 results = []
 for i in range(dataset.num_samples):
     # get prediction
-    crop_scale, keypoints_scoremap_v, kp_uv21_gt, kp_vis, image_crop, crop_center, img_dir, hand_side, head_size \
-        = sess.run([data['crop_scale'], keypoints_scoremap, data['keypoint_uv21'], data['keypoint_vis21'], data['image_crop'], data['crop_center'], data['img_dir'], data['hand_side'], data['head_size']])
-    # crop_scale, keypoints_scoremap_v, kp_uv21_gt, kp_vis, img_dir, hand_side, image_crop \
-    #     = sess.run([data['crop_scale'], keypoints_scoremap, data['keypoint_uv21'], data['keypoint_vis21'], data['image_crop'], data['hand_side'], data['image_crop']])
+    # crop_scale, keypoints_scoremap_v, kp_uv21_gt, kp_vis, image_crop, crop_center, img_dir, hand_side, head_size \
+    #     = sess.run([data['crop_scale'], keypoints_scoremap, data['keypoint_uv21'], data['keypoint_vis21'], data['image_crop'], data['crop_center'], data['img_dir'], data['hand_side'], data['head_size']])
+    crop_scale, keypoints_scoremap_v, kp_uv21_gt, kp_vis, image_crop, crop_center, img_dir, hand_side \
+        = sess.run([data['crop_scale'], keypoints_scoremap, data['keypoint_uv21'], data['keypoint_vis21'], data['image_crop'], data['crop_center'], data['img_dir'], data['hand_side']])
 
     keypoints_scoremap_v = np.squeeze(keypoints_scoremap_v)
     kp_uv21_gt = np.squeeze(kp_uv21_gt)
@@ -99,7 +100,7 @@ for i in range(dataset.num_samples):
     crop_scale = np.squeeze(crop_scale)
     crop_center = np.squeeze(crop_center)
     hand_side = np.squeeze(hand_side)
-    head_size = float(np.squeeze(head_size))
+    # head_size = float(np.squeeze(head_size))
 
     # detect keypoints
     coord_hw_pred_crop = detect_keypoints(np.squeeze(keypoints_scoremap_v))
@@ -115,7 +116,7 @@ for i in range(dataset.num_samples):
         kp_uv21_gt[0, :] = 2 * kp_uv21_gt[0, :] - kp_uv21_gt[12, :]
         coord_uv_pred_crop[0, :] = 2 * coord_uv_pred_crop[0, :] - coord_uv_pred_crop[12, :]
         coord_hw_pred_crop[0, :] = 2 * coord_hw_pred_crop[0, :] - coord_hw_pred_crop[12, :]
-    util.feed(kp_uv21_gt/crop_scale/(head_size*0.7), kp_vis, coord_uv_pred_crop/crop_scale/(head_size*0.7))
+    util.feed(kp_uv21_gt/184, kp_vis, coord_uv_pred_crop/184)
 
     if (i % 100) == 0:
         print('%d / %d images done: %.3f percent' % (i, dataset.num_samples, i*100.0/dataset.num_samples))
@@ -155,5 +156,8 @@ plt.show()
 
 if args.save:
     import json
-    with open('./eval/detection_2d.json', 'w') as f:
+    with open('./eval/detection_2d_mymeasure.json', 'w') as f:
         json.dump(results, f)
+    import pickle
+    with open('./eval/detection_2d_mymeasure.pkl', 'wb') as f:
+        pickle.dump(util, f)

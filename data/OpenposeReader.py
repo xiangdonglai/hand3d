@@ -1,61 +1,18 @@
 import tensorflow as tf
 import math
-import pickle, json
+import pickle, json, os
 import numpy as np
 import numpy.linalg as nl
 from utils.canonical_trafo import canonical_trafo, flip_right_hand
 from utils.general import hand_size_tf, create_multiple_gaussian_map_3d, crop_image_from_xy
 
-def project2D(joints, calib, imgwh=None, applyDistort=True):
-    """
-    Input:
-    joints: N * 3 numpy array.
-    calib: a dict containing 'R', 'K', 't', 'distCoef' (numpy array)
+class OpenposeReader(object):
 
-    Output:
-    pt: 2 * N numpy array
-    inside_img: (N, ) numpy array (bool)
-    """
-    x = np.dot(calib['R'], joints.T) + calib['t']
-    xp = x[:2, :] / x[2, :]
+    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, crop_size_zoom=1.25, crop_size=256, sigma=25.0,
+        coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False, flip_2d=False):
 
-    if applyDistort:
-        X2 = xp[0, :] * xp[0, :]
-        Y2 = xp[1, :] * xp[1, :]
-        XY = X2 * Y2
-        R2 = X2 + Y2
-        R4 = R2 * R2
-        R6 = R4 * R2
-
-        dc = calib['distCoef']
-        radial = 1.0 + dc[0] * R2 + dc[1] * R4 + dc[4] * R6
-        tan_x = 2.0 * dc[2] * XY + dc[3] * (R2 + 2.0 * X2)
-        tan_y = 2.0 * dc[3] * XY + dc[2] * (R2 + 2.0 * Y2)
-
-        # xp = [radial;radial].*xp(1:2,:) + [tangential_x; tangential_y]
-        xp[0, :] = radial * xp[0, :] + tan_x
-        xp[1, :] = radial * xp[1, :] + tan_y
-
-    # pt = bsxfun(@plus, cam.K(1:2,1:2)*xp, cam.K(1:2,3))';
-    pt = np.dot(calib['K'][:2, :2], xp) + calib['K'][:2, 2].reshape((2, 1))
-
-    if imgwh is not None:
-        assert len(imgwh) == 2
-        imw, imh = imgwh
-        winside_img = np.logical_and(pt[0, :] > -0.5, pt[0, :] < imw-0.5) 
-        hinside_img = np.logical_and(pt[1, :] > -0.5, pt[1, :] < imh-0.5) 
-        inside_img = np.logical_and(winside_img, hinside_img) 
-        inside_img = np.logical_and(inside_img, R2 < 1.0) 
-        return pt.T, x.T, inside_img
-
-    return pt.T, x.T
-
-class DomeReader(object):
-
-    def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, crop_size_zoom=1.25, crop_size=256, sigma=25.0, applyDistort=False,
-        coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False, a2=True, a4=True, flip_2d=False):
-
-        self.image_root = '/media/posefs0c/panopticdb/'
+        self.image_root = '/home/donglaix/Documents/Experiments/individ_imgs/'
+        self.annot_root = '/home/donglaix/Documents/Experiments/detected_hand1/'
 
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -73,98 +30,47 @@ class DomeReader(object):
         self.crop_size_zoom = crop_size_zoom
         self.flip_2d = flip_2d
 
-        t_data = []
-        self.camera_data = dict()
-        assert a2 or a4
-        if a2:
-            self.path_to_db = './data/hand_data.json'
-            self.camera_file = './data/camera_data.pkl'
-            with open(self.path_to_db) as f:
-                json_data = json.load(f)
-            for data in json_data['training_data']:
-                data['db_name'] = 'a2/imgs/'
-            for data in json_data['testing_data']:
-                data['db_name'] = 'a2/imgs/'
-            with open(self.camera_file, 'rb') as f:
-                camera_data = pickle.load(f, encoding='latin1')
-
-            if mode == 'training':
-                t_data += json_data['training_data']
-            else:
-                assert mode == 'evaluation'
-                t_data += json_data['testing_data']
-            for key, value in camera_data.items():
-                assert key not in self.camera_data
-                self.camera_data[key] = value
-
-        if a4:
-            self.path_to_db = './data/hand_data_a4_resampled.json'
-            self.camera_file = './data/camera_data_a4.pkl'
-            with open(self.path_to_db) as f:
-                json_data_a4 = json.load(f)
-                for data in json_data_a4['training_data']:
-                    data['db_name'] = 'a4/hdImgs'
-                for data in json_data_a4['testing_data']:
-                    data['db_name'] = 'a4/hdImgs/'
-
-            if mode == 'training':
-                t_data += json_data_a4['training_data']                
-            else:
-                assert mode == 'evaluation'
-                t_data += json_data_a4['testing_data']
-
-            with open(self.camera_file, 'rb') as f:
-                camera_data_a4 = pickle.load(f, encoding='latin1')
-            for key, value in camera_data_a4.items():
-                assert key not in self.camera_data
-                self.camera_data[key] = value
-
-        self.image_size = (1080, 1920)
+        self.image_size = (720, 1080)
         self.crop_size = crop_size
 
         # Building a list of tensors
-        joints3d = []
         joints2d = []
-        Rs = []
         hand_sides = []
         img_dirs = []
-        for ihand, hand3d in enumerate(t_data):
-            if 'resampled' in hand3d and hand3d['resampled'] == 0:
-                continue
-            joint3d = np.array(hand3d['hand3d']).reshape(-1, 3)
-            for i in (1, 5, 9, 13, 17):
-                joint3d[i:i+4] = joint3d[i+3:i-1:-1] # reverse the order of fingers (from palm to tip)
-            for camIdx in hand3d['hand2d']:
-                db_name = hand3d['db_name']
-                seqName = hand3d['seqName']
-                frame_str = hand3d['frame_str']
-                calib = self.camera_data[seqName][camIdx]
-                joint2d, joint3d_rotated = project2D(joint3d, calib, applyDistort=applyDistort)
-                joints3d.append(joint3d_rotated)
-                joints2d.append(joint2d)
-                hand_sides.append(hand3d['lr'])
-                img_dir = '{}/{}/{}/{}/00_{:02d}_{}.jpg'.format(self.image_root, db_name, seqName, frame_str, camIdx, frame_str)
-                img_dirs.append(img_dir)
 
-        joints3d = np.array(joints3d, dtype=np.float32)
+        num_img = 680
+        for ihand in range(num_img):
+            img_dir = os.path.join(self.image_root, 'handTest_{:012d}_rendered.png'.format(ihand))
+            assert os.path.exists(img_dir)
+            annot_dir = os.path.join(self.annot_root, 'handTest_{:012d}_keypoints.json'.format(ihand))
+            assert os.path.exists(annot_dir)
+            with open(annot_dir) as f:
+                data = json.load(f)
+            joint2d = np.array(data["people"][0]["hand_right_keypoints"]).reshape(-1, 3)[:, :2]
+            for i in (1, 5, 9, 13, 17):
+                joint2d[i:i+4] = joint2d[i+3:i-1:-1] # reverse the order of fingers (from palm to tip)
+
+            if np.array(data["people"][0]["hand_right_keypoints"]).reshape(-1, 3)[:, 2].any():
+                joints2d.append(joint2d)
+            else:
+                joints2d.append(joints2d[-1])
+            hand_sides.append(1)
+            img_dirs.append(img_dir)
+
         joints2d = np.array(joints2d, dtype=np.float32)
         hand_sides = np.array(hand_sides, dtype=bool)
 
-        self.num_samples = len(joints3d)
-        self.joints3d = tf.constant(joints3d) # 94221, 21, 3
+        self.num_samples = len(joints2d)
         self.joints2d = tf.constant(joints2d) # 94221, 21, 2
         self.hand_sides = tf.constant(hand_sides) # 94221, 
         self.img_dirs = tf.constant(np.array(img_dirs))
-        print('loaded DomeDB with number of samples {}'.format(self.num_samples))
+        print('loaded Openpose data with number of samples {}'.format(self.num_samples))
 
     def get(self, read_image=True, extra=False):
 
-        [joint3d, joint2d, hand_side, img_dir] = tf.train.slice_input_producer([self.joints3d, self.joints2d, self.hand_sides, self.img_dirs], shuffle=False)
-        keypoint_xyz21 = joint3d
+        [joint2d, hand_side, img_dir] = tf.train.slice_input_producer([self.joints2d, self.hand_sides, self.img_dirs], shuffle=False)
         keypoint_uv21 = joint2d
         if not self.use_wrist_coord:
-            palm_coord = tf.expand_dims(0.5*(keypoint_xyz21[0, :] + keypoint_xyz21[12, :]), 0)
-            keypoint_xyz21 = tf.concat([palm_coord, keypoint_xyz21[1:21, :]], 0)
             palm_coord_uv = tf.expand_dims(0.5*(keypoint_uv21[0, :] + keypoint_uv21[12, :]), 0)
             keypoint_uv21 = tf.concat([palm_coord_uv, keypoint_uv21[1:21, :]], 0)
         if self.coord_uv_noise:
@@ -178,30 +84,7 @@ class DomeReader(object):
         keypoint_vis21 = tf.ones([21,], tf.bool)
         data_dict['keypoint_vis21'] = keypoint_vis21
 
-        keypoint_xyz21 /= 100 # convert dome (centimeter) to meter
-        if self.flip_2d:
-            keypoint_xyz21 = tf.cond(hand_side, lambda: tf.concat([tf.expand_dims(-keypoint_xyz21[:, 0], axis=1), keypoint_xyz21[:, 1:]], axis=1), lambda: keypoint_xyz21)
-
-        kp_coord_xyz21 = keypoint_xyz21
-        data_dict['keypoint_xyz21'] = keypoint_xyz21
         data_dict['keypoint_uv21'] = keypoint_uv21
-        kp_coord_xyz_root = kp_coord_xyz21[0, :] # this is the palm coord
-        kp_coord_xyz21_rel = kp_coord_xyz21 - kp_coord_xyz_root  # relative coords in metric coords
-        index_root_bone_length = tf.sqrt(tf.reduce_sum(tf.square(kp_coord_xyz21_rel[12, :] - kp_coord_xyz21_rel[11, :])))
-        # data_dict['keypoint_scale'] = index_root_bone_length
-        # data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / index_root_bone_length  # normalized by length of 12->11
-        data_dict['keypoint_scale'] = hand_size_tf(kp_coord_xyz21_rel) 
-        data_dict['index_scale'] = index_root_bone_length
-        data_dict['keypoint_xyz21_normed'] = kp_coord_xyz21_rel / data_dict['keypoint_scale']
-
-        # calculate viewpoint and coords in canonical coordinates
-        cond_left = tf.logical_and(tf.cast(tf.ones_like(kp_coord_xyz21), tf.bool), tf.logical_not(hand_side))
-        kp_coord_xyz21_rel_can, rot_mat = canonical_trafo(data_dict['keypoint_xyz21_normed'])
-        kp_coord_xyz21_rel_can, rot_mat = tf.squeeze(kp_coord_xyz21_rel_can), tf.squeeze(rot_mat)
-        if not self.flip_2d:
-            kp_coord_xyz21_rel_can = flip_right_hand(kp_coord_xyz21_rel_can, tf.logical_not(cond_left))
-        data_dict['keypoint_xyz21_can'] = kp_coord_xyz21_rel_can
-        data_dict['rot_mat'] = tf.matrix_inverse(rot_mat)
 
         if self.hand_crop:
             crop_center = keypoint_uv21[12, ::-1]
@@ -284,8 +167,6 @@ class DomeReader(object):
 
         data_dict['scoremap'] = scoremap
         
-        data_dict['scoremap_3d'] = create_multiple_gaussian_map_3d(data_dict['keypoint_xyz21_normed'], int(self.crop_size/8), 5, extra=extra)
-
         names, tensors = zip(*data_dict.items())
 
         if self.shuffle:
@@ -358,9 +239,9 @@ class DomeReader(object):
             return scoremap
 
 if __name__ == '__main__':
-    d = DomeReader(mode='training', flip_2d=True, applyDistort=True,
+    d = OpenposeReader(mode='evaluation', flip_2d=True,
                              batch_size=1, shuffle=True, hand_crop=True, use_wrist_coord=True, crop_size=368, sigma=10.0,
-                             crop_size_zoom=2.0, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True, a4=True, a2=False)
+                             crop_size_zoom=2.0, crop_center_noise=True, crop_offset_noise=True, crop_scale_noise=True)
 
     data = d.get(read_image=True)
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
@@ -373,33 +254,21 @@ if __name__ == '__main__':
     from mpl_toolkits.mplot3d import Axes3D
 
     for i in range(50):
-
-        scoremap_3d, keypoint_xyz21_normed, image_crop, keypoint_uv21, img_dir, scoremap, hand_side \
-            = sess.run([data['scoremap_3d'], data['keypoint_xyz21_normed'], data['image_crop'], data['keypoint_uv21'], data['img_dir'], data['scoremap'], data['hand_side']])
+        image_crop, keypoint_uv21, img_dir, scoremap, hand_side \
+            = sess.run([data['image_crop'], data['keypoint_uv21'], data['img_dir'], data['scoremap'], data['hand_side']])
         print(img_dir[0].decode())
         print(hand_side)
-        scoremap_3d = np.squeeze(scoremap_3d)
-        keypoint_xyz21_normed = np.squeeze(keypoint_xyz21_normed)
         image_crop = np.squeeze((image_crop + 0.5) * 255).astype(np.uint8)
         keypoint_uv21 = np.squeeze(keypoint_uv21)
         scoremap = np.squeeze(scoremap)
 
-        keypoints = detect_keypoints_3d(scoremap_3d)
         keypoints2d = detect_keypoints(scoremap)
 
         fig = plt.figure()
-        ax = fig.add_subplot(221, projection='3d')
-        plot_hand_3d(keypoints, ax)
-        ax.invert_yaxis()
-        ax.invert_zaxis()
-        ax = fig.add_subplot(222, projection='3d')
-        plot_hand_3d(keypoint_xyz21_normed, ax)
-        ax.invert_yaxis()
-        ax.invert_zaxis()
-        ax = fig.add_subplot(223)
+        ax = fig.add_subplot(121)
         ax.imshow(image_crop)
         plot_hand(keypoint_uv21[:, ::-1], ax)
-        ax = fig.add_subplot(224)
+        ax = fig.add_subplot(122)
         ax.imshow(image_crop)
         plot_hand(keypoints2d, ax)
         plt.show()
