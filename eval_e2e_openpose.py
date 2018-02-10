@@ -120,51 +120,51 @@ for i in range(dataset.num_samples):
             plt.show()
             # pdb.set_trace()
 
-    # if (i % 100) == 0:
-    if args.save:
-        coord3d_pred_v_fliped = np.copy(coord3d_pred_v)
-        coord3d_pred_v_fliped[:, 0] = -coord3d_pred_v_fliped[:, 0]
-        fig = plt.figure()
-        ax1 = fig.add_subplot(111, projection='3d')
-        plot_hand_3d(coord3d_pred_v_fliped, ax1, color_fixed=np.array([0.0, 0.0, 1.0]))
-        plt.xlabel('x')
-        plt.ylabel('y')
-        ax1.view_init(azim=-90.0, elev=-70.0)
-        ax1.set_xlim(-0.2, 0.2)
-        ax1.set_ylim(-0.2, 0.2)
-        ax1.set_zlim(-0.2, 0.2)
-        fig.subplots_adjust(top=1, bottom=0, left=0, right=1)
-        
-        # plt.show()
-
-        fig.canvas.draw()
-        figure = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
-        figure = figure.reshape(fig.canvas.get_width_height()[::-1] + (3,))[:, :, ::-1]
-
-        img_dir = img_dir[0].decode().replace('individ_imgs', 'detected_hand1')
-        img = cv2.imread(img_dir)
-        dh = figure.shape[0]
-        dw = int(float(img.shape[1]) / img.shape[0] * dh)
-        resized_img = cv2.resize(img, (dw, dh))
-
-        concat = np.concatenate((resized_img, figure), axis=1)
-        plt.cla()
-        plt.clf()
-        plt.close()
-
-        if args.model:
-            coord3d_rev = 0.7 * 100 * coord3d_pred_v # (hand_size computed from other hands; m - > cm)
-            for ij in (1, 5, 9, 13, 17):
-                coord3d_rev[ij:ij+4] = coord3d_rev[ij+3:ij-1:-1]
-            img = np.array(wrapper.fit_render(coord3d_rev))
-            # plt.imshow(img)
+    if i >= 0:
+        if args.save:
+            coord3d_pred_v_fliped = np.copy(coord3d_pred_v)
+            coord3d_pred_v_fliped[:, 0] = -coord3d_pred_v_fliped[:, 0]
+            fig = plt.figure()
+            ax1 = fig.add_subplot(111, projection='3d')
+            plot_hand_3d(coord3d_pred_v_fliped, ax1, color_fixed=np.array([0.0, 0.0, 1.0]))
+            plt.xlabel('x')
+            plt.ylabel('y')
+            ax1.view_init(azim=-90.0, elev=-70.0)
+            ax1.set_xlim(-0.2, 0.2)
+            ax1.set_ylim(-0.2, 0.2)
+            ax1.set_zlim(-0.2, 0.2)
+            fig.subplots_adjust(top=1, bottom=0, left=0, right=1)
+            
             # plt.show()
 
-            dw = int(float(img.shape[1]) / img.shape[0] * dh)
-            resized_img = cv2.resize(img, (dw, dh))[:, ::-1, ::-1]
-            concat = np.concatenate((concat, resized_img), axis=1)
-            print('%d / %d images done: %.3f percent' % (i, dataset.num_samples, i*100.0/dataset.num_samples))
+            fig.canvas.draw()
+            figure = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+            figure = figure.reshape(fig.canvas.get_width_height()[::-1] + (3,))[:, :, ::-1]
 
-        basename = os.path.basename(img_dir)
-        output_file = os.path.join(args.output_dir, basename)
-        cv2.imwrite(output_file, concat)
+            img_dir = img_dir[0].decode().replace('individ_imgs', 'detected_hand1')
+            img = cv2.imread(img_dir)
+            dh = figure.shape[0]
+            dw = int(float(img.shape[1]) / img.shape[0] * dh)
+            resized_img = cv2.resize(img, (dw, dh))
+
+            concat = np.concatenate((resized_img, figure), axis=1)
+            plt.cla()
+            plt.clf()
+            plt.close()
+
+            if args.model:
+                coord3d_rev = 0.8 * 100 * coord3d_pred_v # (hand_size computed from other hands; m - > cm)
+                for ij in (1, 5, 9, 13, 17):
+                    coord3d_rev[ij:ij+4] = coord3d_rev[ij+3:ij-1:-1]
+                img = np.array(wrapper.fit_render(coord3d_rev))
+                # plt.imshow(img)
+                # plt.show()
+
+                dw = int(float(img.shape[1]) / img.shape[0] * dh)
+                resized_img = cv2.resize(img, (dw, dh))[:, ::-1, ::-1]
+                concat = np.concatenate((concat, resized_img), axis=1)
+                print('%d / %d images done: %.3f percent' % (i, dataset.num_samples, i*100.0/dataset.num_samples))
+
+            basename = os.path.basename(img_dir)
+            output_file = os.path.join(args.output_dir, basename)
+            cv2.imwrite(output_file, concat)
