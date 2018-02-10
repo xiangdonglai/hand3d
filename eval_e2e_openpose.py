@@ -29,12 +29,17 @@ import pdb
 from data.OpenposeReader import OpenposeReader
 from nets.E2ENet import E2ENet
 from utils.general import EvalUtil, get_stb_ref_curves, calc_auc, plot_hand_3d, detect_keypoints, trafo_coords, plot_hand, detect_keypoints_3d, hand_size, load_weights_from_snapshot
+from utils.wrapper_hand_model import wrapper_hand_model
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--visualize', '-v', action='store_true')
 parser.add_argument('--save', '-s', action='store_true')
-parser.add_argument('--output_dir', '-o', type=str, default='/home/donglaix/Documents/Experiments/output_3d_heatmap1')
+parser.add_argument('--output_dir', '-o', type=str, default='/home/donglaix/Documents/Experiments/output_3d_direct1')
+parser.add_argument('--model', '-m', action='store_true')
 args = parser.parse_args()
+
+if args.model:
+    wrapper = wrapper_hand_model()
 
 # get dataset
 dataset = OpenposeReader(mode='evaluation', shuffle=False, use_wrist_coord=True, hand_crop=True, crop_size=368, crop_size_zoom=2.0, flip_2d=True)
@@ -42,7 +47,7 @@ dataset = OpenposeReader(mode='evaluation', shuffle=False, use_wrist_coord=True,
 # build network graph
 data = dataset.get()
 image_crop = data['image_crop']
-lifting_dict = {'method': 'heatmap'}
+lifting_dict = {'method': 'direct'}
 
 # build network
 net = E2ENet(lifting_dict, out_chan=22, crop_size=368)
@@ -59,9 +64,9 @@ sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
 sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
-# cpt = 'snapshots_e2e/model-100000'
+cpt = 'snapshots_e2e/model-100000'
 # cpt = 'snapshots_e2e_RHD_STB_nw/model-38000'
-cpt = 'snapshots_e2e_heatmap/model-100000'
+# cpt = 'snapshots_e2e_heatmap/model-100000'
 load_weights_from_snapshot(sess, cpt, discard_list=['Adam', 'global_step', 'beta', 'scale'])
 
 util = EvalUtil()
@@ -91,7 +96,6 @@ for i in range(dataset.num_samples):
         coord3d_pred_v = coord3d_pred_v[:21, :]
 
     coord3d_pred_v -= coord3d_pred_v[0, :]
-    # rescale to meters
     coord3d_pred_v /= hand_size(coord3d_pred_v)
 
     if (i % 100) == 0:
@@ -116,12 +120,13 @@ for i in range(dataset.num_samples):
             plt.show()
             # pdb.set_trace()
 
+    # if (i % 100) == 0:
     if args.save:
-        coord3d_pred_v[:, 0] = -coord3d_pred_v[:, 0]
-
+        coord3d_pred_v_fliped = np.copy(coord3d_pred_v)
+        coord3d_pred_v_fliped[:, 0] = -coord3d_pred_v_fliped[:, 0]
         fig = plt.figure()
         ax1 = fig.add_subplot(111, projection='3d')
-        plot_hand_3d(coord3d_pred_v, ax1, color_fixed=np.array([0.0, 0.0, 1.0]))
+        plot_hand_3d(coord3d_pred_v_fliped, ax1, color_fixed=np.array([0.0, 0.0, 1.0]))
         plt.xlabel('x')
         plt.ylabel('y')
         ax1.view_init(azim=-90.0, elev=-70.0)
@@ -146,6 +151,19 @@ for i in range(dataset.num_samples):
         plt.cla()
         plt.clf()
         plt.close()
+
+        if args.model:
+            coord3d_rev = 0.7 * 100 * coord3d_pred_v # (hand_size computed from other hands; m - > cm)
+            for ij in (1, 5, 9, 13, 17):
+                coord3d_rev[ij:ij+4] = coord3d_rev[ij+3:ij-1:-1]
+            img = np.array(wrapper.fit_render(coord3d_rev))
+            # plt.imshow(img)
+            # plt.show()
+
+            dw = int(float(img.shape[1]) / img.shape[0] * dh)
+            resized_img = cv2.resize(img, (dw, dh))[:, ::-1, ::-1]
+            concat = np.concatenate((concat, resized_img), axis=1)
+            print('%d / %d images done: %.3f percent' % (i, dataset.num_samples, i*100.0/dataset.num_samples))
 
         basename = os.path.basename(img_dir)
         output_file = os.path.join(args.output_dir, basename)

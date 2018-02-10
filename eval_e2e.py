@@ -40,8 +40,8 @@ args = parser.parse_args()
 
 # get dataset
 # dataset = BinaryDbReader(mode='evaluation', shuffle=False, use_wrist_coord=False)
-dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, use_wrist_coord=False, hand_crop=True, crop_size_zoom=2.0, crop_size=368)
-# dataset = DomeReader(mode='evaluation', shuffle=False, use_wrist_coord=True, hand_crop=True, crop_size=368, crop_size_zoom=2.0, flip_2d=True, a2=False, applyDistort=True)
+# dataset = BinaryDbReaderSTB(mode='evaluation', shuffle=False, use_wrist_coord=False, hand_crop=True, crop_size_zoom=2.0, crop_size=368)
+dataset = DomeReader(mode='evaluation', shuffle=False, use_wrist_coord=True, hand_crop=True, crop_size=368, crop_size_zoom=2.0, flip_2d=True, a2=False, applyDistort=True)
 
 # build network graph
 data = dataset.get()
@@ -64,8 +64,8 @@ sess.run(tf.global_variables_initializer())
 tf.train.start_queue_runners(sess=sess)
 
 # cpt = 'snapshots_e2e_a4-stb/model-39000'
-cpt = 'snapshots_e2e_RHD_STB_nw/model-38000'
-# cpt = 'snapshots_e2e_heatmap/model-100000'
+# cpt = 'snapshots_e2e_RHD_STB_nw/model-38000'
+cpt = 'snapshots_e2e/model-100000'
 load_weights_from_snapshot(sess, cpt, discard_list=['Adam', 'global_step', 'beta'])
 
 util = EvalUtil()
@@ -99,6 +99,8 @@ for i in range(dataset.num_samples):
     coord3d_pred_v -= coord3d_pred_v[0, :]
     # rescale to meters
     coord3d_pred_v *= keypoint_scale / hand_size(coord3d_pred_v)
+    print(keypoint_scale)
+    print(hand_size(coord3d_pred_v))
     # center gt
     keypoint_xyz21 -= keypoint_xyz21[0, :]
 
