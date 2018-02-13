@@ -23,7 +23,7 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-import argparse, cv2, os
+import argparse, cv2, os, json
 import pdb
 
 from data.OpenposeReader import OpenposeReader
@@ -120,7 +120,7 @@ for i in range(dataset.num_samples):
             plt.show()
             # pdb.set_trace()
 
-    if i >= 0:
+    if i >= 130:
         if args.save:
             coord3d_pred_v_fliped = np.copy(coord3d_pred_v)
             coord3d_pred_v_fliped[:, 0] = -coord3d_pred_v_fliped[:, 0]
@@ -156,7 +156,8 @@ for i in range(dataset.num_samples):
                 coord3d_rev = 0.8 * 100 * coord3d_pred_v # (hand_size computed from other hands; m - > cm)
                 for ij in (1, 5, 9, 13, 17):
                     coord3d_rev[ij:ij+4] = coord3d_rev[ij+3:ij-1:-1]
-                img = np.array(wrapper.fit_render(coord3d_rev))
+                img, trans, pose, coeff = wrapper.fit_render(coord3d_rev)
+                img = np.array(img) # convert PIL format to cv2
                 # plt.imshow(img)
                 # plt.show()
 
@@ -164,6 +165,12 @@ for i in range(dataset.num_samples):
                 resized_img = cv2.resize(img, (dw, dh))[:, ::-1, ::-1]
                 concat = np.concatenate((concat, resized_img), axis=1)
                 print('%d / %d images done: %.3f percent' % (i, dataset.num_samples, i*100.0/dataset.num_samples))
+
+                save_dict = {'pose': pose.tolist(), 'coeff': coeff.tolist(), 'trans': trans.tolist()}
+                basename = os.path.basename(img_dir).split('.')[0]
+
+                with open(os.path.join(args.output_dir, basename + '.json'), 'w') as f:
+                    json.dump(save_dict, f)
 
             basename = os.path.basename(img_dir)
             output_file = os.path.join(args.output_dir, basename)

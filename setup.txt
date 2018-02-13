@@ -30,7 +30,6 @@ DomeReader(mode='training', flip_2d=True, applyDistort=True,
                              hand_crop=True, crop_center_noise=True, crop_scale_noise=True, crop_offset_noise=True, a4=True, a2=True)
 fine_tune = False
 PATH_TO_SNAPSHOTS = './snapshots_cpm_rotate_s10_wrist_vgg/model-{}'.format(already_trained)  # only used when USE_RETRAINED is true
-# training parameters
 train_para = {'lr': [1e-4, 1e-5, 1e-6],
               'lr_iter': [int(160000/num_gpu), int(20000/num_gpu)],
               'max_iter': int(200000/num_gpu),
