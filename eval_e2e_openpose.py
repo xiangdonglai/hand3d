@@ -120,7 +120,7 @@ for i in range(dataset.num_samples):
             plt.show()
             # pdb.set_trace()
 
-    if i >= 130:
+    if i >= 0:
         if args.save:
             coord3d_pred_v_fliped = np.copy(coord3d_pred_v)
             coord3d_pred_v_fliped[:, 0] = -coord3d_pred_v_fliped[:, 0]

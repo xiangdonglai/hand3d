@@ -98,9 +98,18 @@ class BVHWriter(object):
         fullname = os.path.join(path, filename)
         self.dynamic_str = ['' for _ in range(num_frame)]
         f = open(fullname, 'w')
-        f.write('HIERARCHY\n')
         # write hierarchy data
-        self.WriteData(self.root, f, 0) # call this function recursively
+        f.write('HIERARCHY\n')
+        f.write('ROOT {}\n'.format(self.root.name))
+        f.write('{\n')
+        f.write('\tOFFSET {:.5f} {:.5f} {:.5f}\n'.format(self.root.offset[0], self.root.offset[1], self.root.offset[2]))
+        f.write('\tCHANNELS 6 Xposition Yposition Zposition Zrotation Yrotation Xrotation\n')
+        for iframe, trans in enumerate(self.trans):
+            self.dynamic_str[iframe] += '{:.5f} {:.5f} {:.5f}'.format(trans[0], trans[1], trans[2])
+        for iframe in range(num_frame):
+            self.dynamic_str[iframe] += ' {:.5f} {:.5f} {:.5f}'.format(0., 0., 0)
+        self.WriteData(self.root, f, 0) # write the bone between it and its children
+        f.write('}\n')
         # write dynamic data
         f.write('MOTION\n')
         f.write('Frames: {}\n'.format(num_frame))
@@ -113,36 +122,26 @@ class BVHWriter(object):
 
 
     def WriteData(self, data, f, depth):
-        """ This function is to be called recursively. 'depth' is used to compute the indent
+        """ Output the bone between this joint and its children. This function is to be called recursively. 'depth' is used to compute the indent.
         """
-        if depth == 0:
-            f.write('ROOT ')
-            f.write(data.name + '\n')
-        elif len(data.children) > 0:
-            f.write(depth * '\t' + 'JOINT ')
-            f.write(data.name + '\n')
-        else:
-            f.write(depth * '\t' + 'End Site\n')
-
-        f.write(depth * '\t' + '{\n')
-
-        f.write((depth+1) * '\t' + 'OFFSET ')
-        f.write('{:.5f} {:.5f} {:.5f}\n'.format(data.offset[0], data.offset[1], data.offset[2]))
-
         if len(data.children) > 0:
-            f.write((depth+1) * '\t' + 'CHANNELS {} '.format(6 if depth == 0 else 3))
-            if depth == 0:
-                f.write('Xposition Yposition Zposition ')
-                for iframe, trans in enumerate(self.trans):
-                    self.dynamic_str[iframe] += '{:.5f} {:.5f} {:.5f}'.format(trans[0], trans[1], trans[2])
-            f.write('Zrotation Yrotation Xrotation\n')
-            for iframe, euler_angle in enumerate(data.euler):
-                self.dynamic_str[iframe] += ' {:.5f} {:.5f} {:.5f}'.format(euler_angle[2], euler_angle[1], euler_angle[0])
-
             for child in data.children:
-                self.WriteData(child, f, depth+1) # call this function recursively
+                f.write((depth+1) * '\t' + 'JOINT ')
+                f.write(child.name + '\n')
+                f.write((depth+1) * '\t' + '{\n')
+                f.write((depth+2) * '\t' + 'OFFSET ')
+                f.write('{:.5f} {:.5f} {:.5f}\n'.format(data.offset[0], data.offset[1], data.offset[2]))
+                f.write((depth+2) * '\t' + 'CHANNELS 3 Zrotation Yrotation Xrotation\n')
+                for iframe, euler_angle in enumerate(data.euler):
+                    self.dynamic_str[iframe] += ' {:.5f} {:.5f} {:.5f}'.format(euler_angle[2], euler_angle[1], euler_angle[0])
+                self.WriteData(child, f, depth+1)
+                f.write((depth+1) * '\t' + '}\n')
 
-        f.write(depth * '\t' + '}\n')
+        else:
+            f.write((depth+1) * '\t' + 'End Site\n')
+            f.write((depth+1) * '\t' + '{\n')
+            f.write((depth+2) * '\t' + 'OFFSET {:.5f} {:.5f} {:.5f}\n'.format(data.offset[0], data.offset[1], data.offset[2]))
+            f.write((depth+1) * '\t' + '}\n')
 
 
     @classmethod
