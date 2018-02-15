@@ -47,6 +47,7 @@ class wrapper_hand_model(object):
         coeff = np.array(self.ccoeff[:]).reshape(-1, 3)
         return trans, pose, coeff
 
+
     def fit2d(self, joint2d, calibK):
         assert joint2d.shape == (21, 2) and calibK.shape == (3, 3)
         self.ctarget2d_array[:] = joint2d.reshape(-1).tolist()
@@ -55,6 +56,7 @@ class wrapper_hand_model(object):
         fit_result = (ctypes.c_double*63)()
         self.extract_fit_result(self.cmodel_file, self.cpose, self.ccoeff, self.ctrans, fit_result)
         return np.array(fit_result[:]).reshape(-1, 3) * 100 # m -> cm
+
 
     def render(self, cameraMode=False, target=True):
         if cameraMode:

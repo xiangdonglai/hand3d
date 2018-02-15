@@ -207,8 +207,10 @@ for i in range(dataset.num_samples):
             plot_hand(kp2d_uv[:, ::-1], ax1, color_fixed=np.array([0.0, 1.0, 0.0]))
 
             glimg = wrapper.render(cameraMode=True, target=False)
+            mask = (np.sum(glimg, axis=2, keepdims=True) == 0.0)
+            image_overlap = np.tile(mask, (1,1,3)) * image_v + glimg
             ax2 = fig.add_subplot(122)
-            ax2.imshow(glimg)
+            ax2.imshow(image_overlap)
 
             plt.show()
 
