@@ -32,11 +32,16 @@ from data.DomeReader import DomeReader
 from nets.E2ENet import E2ENet
 from nets.CPM import CPM
 from utils.general import EvalUtil, get_stb_ref_curves, calc_auc, plot_hand_3d, detect_keypoints, trafo_coords, plot_hand, detect_keypoints_3d, hand_size, load_weights_from_snapshot
+from utils.wrapper_hand_model import wrapper_hand_model
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--visualize', '-v', action='store_true')
 parser.add_argument('--save', '-s', action='store_true')
+parser.add_argument('--model', '-m', action='store_true')
 args = parser.parse_args()
+
+if args.model:
+    wrapper = wrapper_hand_model()
 
 # get dataset
 # dataset = BinaryDbReader(mode='evaluation', shuffle=False, use_wrist_coord=False)
@@ -46,8 +51,8 @@ dataset = DomeReader(mode='evaluation', shuffle=False, use_wrist_coord=True, han
 # build network graph
 data = dataset.get()
 image_crop = data['image_crop']
-# lifting_dict = {'method': 'heatmap'}
-lifting_dict = {'method': 'direct'}
+lifting_dict = {'method': 'heatmap'}
+# lifting_dict = {'method': 'direct'}
 # build network
 net = E2ENet(lifting_dict, out_chan=22, crop_size=368)
 
@@ -65,7 +70,7 @@ tf.train.start_queue_runners(sess=sess)
 
 # cpt = 'snapshots_e2e_a4-stb/model-39000'
 # cpt = 'snapshots_e2e_RHD_STB_nw/model-38000'
-cpt = 'snapshots_e2e/model-100000'
+cpt = 'snapshots_e2e_heatmap/model-100000'
 load_weights_from_snapshot(sess, cpt, discard_list=['Adam', 'global_step', 'beta'])
 
 util = EvalUtil()
@@ -73,18 +78,24 @@ util = EvalUtil()
 for i in range(dataset.num_samples):
     # get prediction
     if lifting_dict['method'] == 'direct':
-        keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21, image_crop_v, coord_xyz_norm, scoremap_v = \
-            sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, rel_dict['coord_xyz_norm'], heatmap_2d])
+        keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21, image_crop_v, coord_xyz_norm, scoremap_v, image_v, K, DC, hand_side, crop_scale, crop_center = \
+            sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, rel_dict['coord_xyz_norm'], heatmap_2d, data['image'], data['K'], data['DC'], data['hand_side'], data['crop_scale'], data['crop_center']])
     elif lifting_dict['method'] == 'heatmap':
-        keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21, image_crop_v, scoremap_v, scoremap_3d_v = \
-            sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, heatmap_2d, rel_dict['heatmap_3d'][-1]])
+        keypoint_xyz21, keypoint_vis21, keypoint_scale, keypoint_uv21, image_crop_v, scoremap_v, scoremap_3d_v, image_v, K, DC, hand_side, crop_scale, crop_center = \
+            sess.run([data['keypoint_xyz21'], data['keypoint_vis21'], data['keypoint_scale'], data['keypoint_uv21'], image_crop, heatmap_2d, rel_dict['heatmap_3d'][-1], data['image'], data['K'], data['DC'], data['hand_side'], data['crop_scale'], data['crop_center']])
 
     keypoint_xyz21 = np.squeeze(keypoint_xyz21)
     keypoint_vis21 = np.squeeze(keypoint_vis21)
     keypoint_scale = np.squeeze(keypoint_scale)
     keypoint_uv21 = np.squeeze(keypoint_uv21)
+    hand_side = np.squeeze(hand_side)
     image_crop_v = np.squeeze((image_crop_v+0.5)*255).astype(np.uint8)
+    image_v = np.squeeze((image_v+0.5)*255).astype(np.uint8)
     scoremap_v = np.squeeze(scoremap_v)
+    K = np.squeeze(K)
+    DC = np.squeeze(DC)
+    crop_scale = np.squeeze(crop_scale)
+    crop_center = np.squeeze(crop_center)
 
     coord2d_v = detect_keypoints(scoremap_v)
     coord2d_v = coord2d_v[:21, :]
@@ -99,9 +110,8 @@ for i in range(dataset.num_samples):
     coord3d_pred_v -= coord3d_pred_v[0, :]
     # rescale to meters
     coord3d_pred_v *= keypoint_scale / hand_size(coord3d_pred_v)
-    print(keypoint_scale)
-    print(hand_size(coord3d_pred_v))
     # center gt
+    keypoint_xyz_origin = np.copy(keypoint_xyz21)
     keypoint_xyz21 -= keypoint_xyz21[0, :]
 
     if type(dataset) == BinaryDbReaderSTB and dataset.use_wrist_coord:
@@ -112,7 +122,7 @@ for i in range(dataset.num_samples):
 
     util.feed(keypoint_xyz21, keypoint_vis21, coord3d_pred_v)
 
-    if (i % 100) == 0:
+    if (i % 10) == 0:
         print('%d / %d images done: %.3f percent' % (i, dataset.num_samples, i*100.0/dataset.num_samples))
 
         if args.visualize:
@@ -168,6 +178,40 @@ for i in range(dataset.num_samples):
         # plt.imshow(figure)
         # plt.show()
         cv2.imwrite('../dome_results_heatmap/{0:04d}.jpg'.format(i), figure)
+
+
+    if args.model:
+        if (i % 10) == 0 and hand_side[0] == 1:
+            # fit a hand model on top of the result
+            print(hand_side)
+            from utils.camera import project
+            fig = plt.figure(1)
+            ax1 = fig.add_subplot(121)
+            ax1.imshow(image_v)
+            # keypoint_xyz_origin *= 100 # m -> cm
+            # kp2d, _ = project(keypoint_xyz_origin, K, distCoef=DC)
+            # coor2d_v axis is hw.
+            coord3d_rev = (coord3d_pred_v + np.array([[0.0, 0.0, 5.0]])) * 100 # Put the hand in front of the camera!! to centimeter
+            for ij in (1, 5, 9, 13, 17):
+                coord3d_rev[ij:ij+4] = coord3d_rev[ij+3:ij-1:-1]
+            wrapper.fit3d(coord3d_rev)
+            coord2d_hw_global = (coord2d_v-dataset.crop_size/2) / crop_scale + crop_center
+            plot_hand(coord2d_hw_global, ax1, color_fixed=np.array([1.0, 0.0, 0.0]))
+            coord2d_uv_global = coord2d_hw_global[:, ::-1]
+            for ij in (1, 5, 9, 13, 17):
+                coord2d_uv_global[ij:ij+4] = coord2d_uv_global[ij+3:ij-1:-1]
+            coord3d_fit = wrapper.fit2d(coord2d_uv_global, K)
+            kp2d_uv, _ = project(coord3d_fit, K)
+            for ij in (1, 5, 9, 13, 17):
+                kp2d_uv[ij:ij+4] = kp2d_uv[ij+3:ij-1:-1]
+            plot_hand(kp2d_uv[:, ::-1], ax1, color_fixed=np.array([0.0, 1.0, 0.0]))
+
+            glimg = wrapper.render(cameraMode=True, target=False)
+            ax2 = fig.add_subplot(122)
+            ax2.imshow(glimg)
+
+            plt.show()
+
 
 # Output results
 mean, median, auc, pck_curve_all, threshs = util.get_measures(0.0, 0.050, 20)  # rainier: Should lead to 0.764 / 9.405 / 12.210

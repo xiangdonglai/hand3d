@@ -125,7 +125,8 @@ class DomeReader(object):
         # Building a list of tensors
         joints3d = []
         joints2d = []
-        Rs = []
+        Ks = []
+        DCs = [] # distortion coeffs
         hand_sides = []
         img_dirs = []
         for ihand, hand3d in enumerate(t_data):
@@ -145,21 +146,27 @@ class DomeReader(object):
                 hand_sides.append(hand3d['lr'])
                 img_dir = '{}/{}/{}/{}/00_{:02d}_{}.jpg'.format(self.image_root, db_name, seqName, frame_str, camIdx, frame_str)
                 img_dirs.append(img_dir)
+                Ks.append(calib['K'])
+                DCs.append(calib['distCoef'])
 
         joints3d = np.array(joints3d, dtype=np.float32)
         joints2d = np.array(joints2d, dtype=np.float32)
         hand_sides = np.array(hand_sides, dtype=bool)
+        Ks = np.array(Ks, dtype=np.float32)
+        DCs = np.array(DCs, dtype=np.float32)
 
         self.num_samples = len(joints3d)
         self.joints3d = tf.constant(joints3d) # 94221, 21, 3
         self.joints2d = tf.constant(joints2d) # 94221, 21, 2
         self.hand_sides = tf.constant(hand_sides) # 94221, 
         self.img_dirs = tf.constant(np.array(img_dirs))
+        self.Ks = tf.constant(Ks)
+        self.DCs = tf.constant(DCs)
         print('loaded DomeDB with number of samples {}'.format(self.num_samples))
 
     def get(self, read_image=True, extra=False):
 
-        [joint3d, joint2d, hand_side, img_dir] = tf.train.slice_input_producer([self.joints3d, self.joints2d, self.hand_sides, self.img_dirs], shuffle=False)
+        [joint3d, joint2d, hand_side, img_dir, K, DC] = tf.train.slice_input_producer([self.joints3d, self.joints2d, self.hand_sides, self.img_dirs, self.Ks, self.DCs], shuffle=False)
         keypoint_xyz21 = joint3d
         keypoint_uv21 = joint2d
         if not self.use_wrist_coord:
@@ -174,9 +181,11 @@ class DomeReader(object):
         data_dict = {}
         data_dict['img_dir'] = img_dir
         data_dict['hand_side'] = tf.one_hot(tf.cast(hand_side, tf.uint8), depth=2, on_value=1.0, off_value=0.0, dtype=tf.float32)
+        data_dict['K'] = K
+        data_dict['DC'] = DC
 
         keypoint_vis21 = tf.ones([21,], tf.bool)
-        data_dict['keypoint_vis21'] = keypoint_vis21
+        data_dict['keypoint_uv21_origin'] = data_dict['keypoint_vis21'] = keypoint_vis21
 
         keypoint_xyz21 /= 100 # convert dome (centimeter) to meter
         if self.flip_2d:
@@ -236,6 +245,8 @@ class DomeReader(object):
             scale = tf.cast(self.crop_size, tf.float32) / crop_size_best
             # scale = tf.minimum(tf.maximum(scale, 1.0), 10.0)
             data_dict['crop_scale'] = scale
+            if self.flip_2d:
+                crop_center = tf.cond(hand_side, lambda: tf.constant(self.image_size, dtype=tf.float32) - tf.ones((2,), dtype=tf.float32)  - crop_center, lambda: crop_center)
             data_dict['crop_center'] = crop_center
 
             if self.crop_offset_noise:
@@ -260,7 +271,6 @@ class DomeReader(object):
             image = tf.image.pad_to_bounding_box(image, 0, 0, 1080, 1920)
             image.set_shape((1080, 1920, 3))
             image = tf.cast(image, tf.float32)
-            data_dict['image'] = image / 255.0 - 0.5
             if self.hand_crop:
                 img_crop = crop_image_from_xy(tf.expand_dims(image, 0), crop_center, self.crop_size, scale)
                 img_crop =  img_crop / 255.0 - 0.5
@@ -268,6 +278,9 @@ class DomeReader(object):
                 if self.flip_2d:
                     img_crop = tf.cond(hand_side, lambda: img_crop[:, ::-1, :], lambda: img_crop)
                 data_dict['image_crop'] = img_crop
+            if self.flip_2d:
+                image = tf.cond(hand_side, lambda: image[:, ::-1, :], lambda: image)
+            data_dict['image'] = image / 255.0 - 0.5
 
         keypoint_hw21 = tf.stack([keypoint_uv21[:, 1], keypoint_uv21[:, 0]], -1)
 

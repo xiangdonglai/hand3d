@@ -156,7 +156,8 @@ for i in range(dataset.num_samples):
                 coord3d_rev = 0.8 * 100 * coord3d_pred_v # (hand_size computed from other hands; m - > cm)
                 for ij in (1, 5, 9, 13, 17):
                     coord3d_rev[ij:ij+4] = coord3d_rev[ij+3:ij-1:-1]
-                img, trans, pose, coeff = wrapper.fit_render(coord3d_rev)
+                trans, pose, coeff = wrapper.fit3d(coord3d_rev)
+                img = wrapper.render()
                 img = np.array(img) # convert PIL format to cv2
                 # plt.imshow(img)
                 # plt.show()
