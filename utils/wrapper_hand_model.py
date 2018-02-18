@@ -14,7 +14,7 @@ class wrapper_hand_model(object):
         self.fit_hand3d.restype = None
 
         self.Opengl_visualize = self.lib.Opengl_visualize
-        self.Opengl_visualize.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.c_bool]
+        self.Opengl_visualize.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.c_bool, ctypes.c_uint]
         self.Opengl_visualize.restype = None
 
         self.fit_hand2d = self.lib.fit_hand2d
@@ -35,8 +35,11 @@ class wrapper_hand_model(object):
         self.calibK = (ctypes.c_double*9)()
         self.cret_bytes_cam = (ctypes.c_ubyte*(1080*1920*3))()
 
-        self.first_render = True
 
+    def reset_value(self):
+        self.ctrans[:] = [0.0 for _ in range(3)]
+        self.ccoeff[:] = [1.0 for _ in range(63)]
+        self.cpose[:] = [0.0 for _ in range(63)]
 
     def fit3d(self, joint3d):
         assert joint3d.shape == (21, 3)
@@ -58,21 +61,19 @@ class wrapper_hand_model(object):
         return np.array(fit_result[:]).reshape(-1, 3) * 100 # m -> cm
 
 
-    def render(self, cameraMode=False, target=True):
+    def render(self, cameraMode=False, target=True, first_render=False, position=0):
         if cameraMode:
             read_buffer = self.cret_bytes_cam
         else:
             read_buffer = self.cret_bytes
         if target:
-            if self.first_render:
-                self.Opengl_visualize(self.cmodel_file, read_buffer, self.cpose, self.ccoeff, self.ctrans, self.ctarget_array, ctypes.c_bool(cameraMode))
-                self.first_render = False
-            self.Opengl_visualize(self.cmodel_file, read_buffer, self.cpose, self.ccoeff, self.ctrans, self.ctarget_array, ctypes.c_bool(cameraMode))
+            if first_render:
+                self.Opengl_visualize(self.cmodel_file, read_buffer, self.cpose, self.ccoeff, self.ctrans, self.ctarget_array, ctypes.c_bool(cameraMode), position)
+            self.Opengl_visualize(self.cmodel_file, read_buffer, self.cpose, self.ccoeff, self.ctrans, self.ctarget_array, ctypes.c_bool(cameraMode), position)
         else:
-            if self.first_render:
-                self.Opengl_visualize(self.cmodel_file, read_buffer, self.cpose, self.ccoeff, self.ctrans, None, ctypes.c_bool(cameraMode))
-                self.first_render = False
-            self.Opengl_visualize(self.cmodel_file, read_buffer, self.cpose, self.ccoeff, self.ctrans, None, ctypes.c_bool(cameraMode))
+            if first_render:
+                self.Opengl_visualize(self.cmodel_file, read_buffer, self.cpose, self.ccoeff, self.ctrans, None, ctypes.c_bool(cameraMode), position)
+            self.Opengl_visualize(self.cmodel_file, read_buffer, self.cpose, self.ccoeff, self.ctrans, None, ctypes.c_bool(cameraMode), position)
         img = bytes(read_buffer)
         if not cameraMode:
             img = Image.frombytes("RGB", (600, 600), img)
