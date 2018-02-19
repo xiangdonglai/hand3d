@@ -11,7 +11,7 @@ class DomeStreamReader(object):
     def __init__(self, mode='training', batch_size=1, shuffle=False, hand_crop=False, use_wrist_coord=False, crop_size_zoom=1.25, crop_size=256, sigma=25.0,
         coord_uv_noise=False, crop_center_noise=False, crop_offset_noise=False, crop_scale_noise=False, flip_2d=False):
 
-        self.path_to_db = './data/DomeStream.pkl'
+        self.path_to_db = './data/DomeStreamTest1.pkl'
 
         self.batch_size = batch_size
         self.shuffle = shuffle

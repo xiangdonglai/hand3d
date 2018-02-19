@@ -35,7 +35,8 @@ from utils.camera import project
 parser = argparse.ArgumentParser()
 parser.add_argument('--visualize', '-v', action='store_true')
 parser.add_argument('--save', '-s', action='store_true')
-parser.add_argument('--output_dir', '-o', type=str, default='/home/donglaix/Documents/Experiments/output3d_domestream_fixcoeff')
+parser.add_argument('--output_dir', '-o', type=str, default='/home/donglaix/Documents/Experiments/output3d_test1')
+parser.add_argument('--original', '-r', action='store_true')
 args = parser.parse_args()
 
 wrapper = wrapper_hand_model()
@@ -128,6 +129,11 @@ for i in range(dataset.num_samples):
 
         concat = np.array(image_overlap, dtype=np.uint8)
         concat = cv2.resize(concat, (1066, 600))
+
+        if args.original:
+            image_v = np.array(image_v, dtype=np.uint8)
+            image_v = cv2.resize(image_v, (1066, 600))
+            concat = np.concatenate((image_v, concat), axis=1)
 
         glimg2 = wrapper.render(cameraMode=False, target=False, first_render=True)
         concat = np.concatenate((concat, np.array(glimg2, dtype=np.uint8)), axis=1)
