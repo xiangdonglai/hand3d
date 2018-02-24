@@ -118,7 +118,7 @@ for i in range(dataset.num_samples):
         coord2d_uv_global = np.copy(coord2d_hw_global[:, ::-1])
         for ij in (1, 5, 9, 13, 17):
             coord2d_uv_global[ij:ij+4] = coord2d_uv_global[ij+3:ij-1:-1]
-        coord3d_fit = wrapper.fit2d(coord2d_uv_global, K)
+        trans, pose, coeff, coord3d_fit = wrapper.fit2d(coord2d_uv_global, K)
         kp2d_uv, _ = project(coord3d_fit, K)
         for ij in (1, 5, 9, 13, 17):
             kp2d_uv[ij:ij+4] = kp2d_uv[ij+3:ij-1:-1]
@@ -144,7 +144,11 @@ for i in range(dataset.num_samples):
         glimg4 = wrapper.render(cameraMode=False, target=False, first_render=False, position=2)
         concat = np.concatenate((concat, np.array(glimg4, dtype=np.uint8)), axis=1)
 
-        assert cv2.imwrite(os.path.join(args.output_dir, '{:04d}.png'.format(i)), concat[:, :, ::-1])
+        assert cv2.imwrite(os.path.join(args.output_dir, 'test1_{:04d}.png'.format(i)), concat[:, :, ::-1])
+        
+        save_dict = {'pose': pose.tolist(), 'coeff': coeff.tolist(), 'trans': trans.tolist()}
+        with open(os.path.join(args.output_dir, '{:04d}.json'.format(i)), 'w') as f:
+            json.dump(save_dict, f)
 
         # fig = plt.figure()
         # ax1 = fig.add_subplot(151)

@@ -53,8 +53,9 @@ class BVHWriter(object):
 
         i = 0
         idj = self.update_inds[i]
+        crdet = nl.det(self.MTa[4*idj:4*idj+3, :3]) ** (1./3) # cubic root of determinant, put in scaling
         offset = self.MTa[4*idj:4*idj+3, 3]
-        scale = coeff[idj, 0]
+        scale = coeff[idj, 0] * crdet
 
         root = BVHData('Wrist', (offset[0], offset[1], offset[2]), scale)
         dict_data[idj] = root
@@ -81,8 +82,8 @@ class BVHWriter(object):
         i = 0
         idj = self.update_inds[i]
         poseR = self.AngleAxisToRotationMatrix(pose[idj, :3])
-        det = nl.det(self.MTa[4*idj:4*idj+3, :3]) ** (1./3)
-        toparentR = self.MTa[4*idj:4*idj+3, :3] / det
+        crdet = nl.det(self.MTa[4*idj:4*idj+3, :3]) ** (1./3) # cubic root of determinant, put in scaling
+        toparentR = self.MTa[4*idj:4*idj+3, :3] / crdet
         R = np.dot(toparentR, poseR)
         self.root.euler.append(self.RotationMatrixToEulerAngle(R))
 
@@ -102,12 +103,14 @@ class BVHWriter(object):
         f.write('HIERARCHY\n')
         f.write('ROOT {}\n'.format(self.root.name))
         f.write('{\n')
-        f.write('\tOFFSET {:.5f} {:.5f} {:.5f}\n'.format(self.root.offset[0], self.root.offset[1], self.root.offset[2]))
+        # f.write('\tOFFSET {:.5f} {:.5f} {:.5f}\n'.format(self.root.offset[0], self.root.offset[1], self.root.offset[2]))
+        f.write('\tOFFSET {:.5f} {:.5f} {:.5f}\n'.format(0., 0., 0.))
         f.write('\tCHANNELS 6 Xposition Yposition Zposition Zrotation Yrotation Xrotation\n')
         for iframe, trans in enumerate(self.trans):
-            self.dynamic_str[iframe] += '{:.5f} {:.5f} {:.5f}'.format(trans[0], trans[1], trans[2])
+            self.dynamic_str[iframe] += '{:.5f} {:.5f} {:.5f}'.format(trans[0] + self.root.offset[0], trans[1] + self.root.offset[1], trans[2] + self.root.offset[2])
         for iframe in range(num_frame):
             self.dynamic_str[iframe] += ' {:.5f} {:.5f} {:.5f}'.format(0., 0., 0)
+            # self.dynamic_str[iframe] += ' {:.5f} {:.5f} {:.5f}'.format(self.root.euler[iframe][2], self.root.euler[iframe][1], self.root.euler[iframe][0])
         self.WriteData(self.root, f, 0) # write the bone between it and its children
         f.write('}\n')
         # write dynamic data
@@ -130,7 +133,10 @@ class BVHWriter(object):
                 f.write(child.name + '\n')
                 f.write((depth+1) * '\t' + '{\n')
                 f.write((depth+2) * '\t' + 'OFFSET ')
-                f.write('{:.5f} {:.5f} {:.5f}\n'.format(data.offset[0], data.offset[1], data.offset[2]))
+                if depth == 0:
+                    f.write('{:.5f} {:.5f} {:.5f}\n'.format(0., 0., 0.)) # if this is writing offset to root, don't write
+                else:
+                    f.write('{:.5f} {:.5f} {:.5f}\n'.format(data.offset[0], data.offset[1], data.offset[2]))
                 f.write((depth+2) * '\t' + 'CHANNELS 3 Zrotation Yrotation Xrotation\n')
                 for iframe, euler_angle in enumerate(data.euler):
                     self.dynamic_str[iframe] += ' {:.5f} {:.5f} {:.5f}'.format(euler_angle[2], euler_angle[1], euler_angle[0])
@@ -219,7 +225,7 @@ class BVHWriter(object):
 
 if __name__ == '__main__':
     w = BVHWriter()    
-    w.ParsePath('/home/donglaix/Documents/Experiments/output_3d_direct1/')
+    w.ParsePath('/home/donglaix/Documents/Experiments/output3d_test1/')
 
     # R = w.AngleAxisToRotationMatrix(np.array([0., np.pi/2, 0]))
     # euler_angle = np.array([1.0, -0.5, 0.8])

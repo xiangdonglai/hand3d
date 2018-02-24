@@ -58,7 +58,10 @@ class wrapper_hand_model(object):
         self.fit_hand2d(self.ctarget2d_array, self.calibK, self.cmodel_file, self.cpose, self.ccoeff, self.ctrans)
         fit_result = (ctypes.c_double*63)()
         self.extract_fit_result(self.cmodel_file, self.cpose, self.ccoeff, self.ctrans, fit_result)
-        return np.array(fit_result[:]).reshape(-1, 3) * 100 # m -> cm
+        trans = np.array(self.ctrans[:])
+        pose = np.array(self.cpose[:]).reshape(-1, 3)
+        coeff = np.array(self.ccoeff[:]).reshape(-1, 3)
+        return trans, pose, coeff, np.array(fit_result[:]).reshape(-1, 3) * 100 # m -> cm
 
 
     def render(self, cameraMode=False, target=True, first_render=False, position=0):
